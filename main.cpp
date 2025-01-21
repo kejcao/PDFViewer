@@ -19,6 +19,26 @@ private:
     fz_document* doc;
 
 public:
+    sf::Vector2f lastMousePos;
+    bool isPanning = false;
+
+    void updatePanning() {
+        if (sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
+            sf::Vector2i mousePos = sf::Mouse::getPosition(window);
+
+            if (!isPanning) {
+                isPanning = true;
+                lastMousePos = sf::Vector2f(mousePos);
+            } else {
+                sf::Vector2f delta = sf::Vector2f(mousePos) - lastMousePos;
+                page_sprite.move(delta);
+                lastMousePos = sf::Vector2f(mousePos);
+            }
+        } else {
+            isPanning = false;
+        }
+    }
+
     PDFViewer(const char* filename)
         : current_page(0)
         , zoom(100.0f) {
@@ -126,6 +146,8 @@ public:
             while (window.pollEvent(event)) {
                 handleEvent(event);
             }
+
+            updatePanning();
 
             window.clear(sf::Color::White);
             window.draw(page_sprite);
