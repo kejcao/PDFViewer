@@ -1,13 +1,17 @@
 // https://mupdf.readthedocs.io/en/latest/using-mupdf.html
+// https://mupdf.readthedocs.io/_/downloads/en/latest/pdf/
 // https://poe.com/chat/32am59gnfpdkuvwex7w
 
 #include <SFML/Graphics.hpp>
+#include <imgui-SFML.h>
+#include <imgui.h>
 #include <iostream>
 #include <mupdf/fitz.h>
 #include <mupdf/fitz/color.h>
 #include <mupdf/fitz/context.h>
 #include <mupdf/fitz/document.h>
 #include <mupdf/fitz/geometry.h>
+#include <mupdf/fitz/outline.h>
 
 class PDFViewer {
 private:
@@ -15,10 +19,10 @@ private:
     float zoom;
     sf::RenderWindow window;
     sf::Texture page_texture;
-    sf::Sprite page_sprite;
-    sf::Uint8* pixels = nullptr;
+    sf::Sprite* page_sprite;
+    unsigned char* pixels = nullptr;
 
-    bool dual_mode = true;
+    bool dual_mode = false;
 
     fz_context* ctx;
     fz_document* doc;
@@ -28,7 +32,7 @@ public:
     bool isPanning = false;
 
     void updatePanning() {
-        if (sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
+        if (sf::Mouse::isButtonPressed(sf::Mouse::Button::Left)) {
             sf::Vector2i mousePos = sf::Mouse::getPosition(window);
 
             if (!isPanning) {
@@ -36,7 +40,7 @@ public:
                 lastMousePos = sf::Vector2f(mousePos);
             } else {
                 sf::Vector2f delta = sf::Vector2f(mousePos) - lastMousePos;
-                page_sprite.move(delta);
+                page_sprite->move(delta);
                 lastMousePos = sf::Vector2f(mousePos);
             }
         } else {
@@ -44,8 +48,31 @@ public:
         }
     }
 
+    void print_outline(fz_context* ctx, fz_outline* outline, int level) {
+        while (outline) {
+            for (int i = 0; i < level; i++) {
+                printf("  ");
+            }
+
+            // Print the title and URI of the outline item
+            printf("%s", outline->title ? outline->title : "No Title");
+            if (outline->uri) {
+                printf(" -> %s", outline->uri);
+            }
+            printf("\n");
+
+            // Recursively print the child items
+            if (outline->down) {
+                print_outline(ctx, outline->down, level + 1);
+            }
+
+            // Move to the next item at the same level
+            outline = outline->next;
+        }
+    }
+
     PDFViewer(const char* filename)
-        : current_page(2)
+        : current_page(0)
         , zoom(1.0f) {
 
         /* Create a context to hold the exception stack and various caches. */
@@ -83,6 +110,16 @@ public:
             fz_drop_context(ctx);
             throw std::runtime_error("cannot count number of pages\n");
         }
+
+        fz_outline* outline;
+        fz_try(ctx) {
+            outline = fz_load_outline(ctx, doc);
+        }
+        fz_catch(ctx) {
+            throw std::runtime_error("cannot load table of contents\n");
+        }
+        print_outline(ctx, outline, 0);
+        fz_drop_outline(ctx, outline);
     }
 
     ~PDFViewer() {
@@ -133,12 +170,15 @@ public:
 
         if (pixels != nullptr)
             delete[] pixels;
-        int width = 0, height = pixmaps[0]->h;
+        unsigned int width = 0, height = 0;
         for (int i = 0; i < pixmaps.size(); ++i) {
-            assert(pixmaps[i]->h == pixmaps[(i + 1) % pixmaps.size()]->h);
+            if (pixmaps[i]->h > height) {
+                height = pixmaps[i]->h;
+            }
             width += pixmaps[i]->w;
         }
-        pixels = new sf::Uint8[width * height * 4];
+        std::cout << width << " " << height << "\n";
+        pixels = new unsigned char[width * height * 4];
 
         int i = 0;
         for (int y = 0; y < height; ++y) {
@@ -146,9 +186,9 @@ public:
                 unsigned char* p = &pix->samples[y * pix->stride];
 
                 for (int x = 0; x < pix->w; ++x) {
-                    pixels[i * 4 + 0] = (sf::Uint8)p[0];
-                    pixels[i * 4 + 1] = (sf::Uint8)p[1];
-                    pixels[i * 4 + 2] = (sf::Uint8)p[2];
+                    pixels[i * 4 + 0] = p[0];
+                    pixels[i * 4 + 1] = p[1];
+                    pixels[i * 4 + 2] = p[2];
                     pixels[i * 4 + 3] = 255;
 
                     p += pix->n;
@@ -157,75 +197,100 @@ public:
             }
         }
 
-        page_texture.create(width, height);
+        page_texture = sf::Texture({ width, height });
         page_texture.update(pixels);
-        page_sprite = sf::Sprite();
-        page_sprite.setTexture(page_texture);
+        page_sprite = new sf::Sprite(page_texture);
 
         auto [tx, ty] = page_texture.getSize();
         auto [wx, wy] = window.getSize();
-        page_sprite.setPosition(
+        page_sprite->setPosition({
             (wx - tx) / 2.0f,
-            (wy - ty) / 2.0f);
+            (wy - ty) / 2.0f,
+        });
 
         for (auto* pix : pixmaps)
             fz_drop_pixmap(ctx, pix);
     }
 
     void run() {
-        window.create(sf::VideoMode(800, 600), "PDF Viewer");
+        window.create(sf::VideoMode({ 800, 600 }), "PDF Viewer");
+        window.setFramerateLimit(60);
+        auto _ = ImGui::SFML::Init(window);
         renderPage();
 
+        sf::Clock deltaClock;
         while (window.isOpen()) {
-            sf::Event event;
-            while (window.pollEvent(event)) {
-                handleEvent(event);
+            while (const std::optional event = window.pollEvent()) {
+                if (event.has_value()) {
+                    ImGui::SFML::ProcessEvent(window, event.value());
+                    handleEvent(event.value());
+                }
             }
+            ImGui::SFML::Update(window, deltaClock.restart());
 
             updatePanning();
+            renderGUI();
 
             window.clear(sf::Color::White);
-            window.draw(page_sprite);
+            window.draw(*page_sprite);
+            ImGui::SFML::Render(window);
             window.display();
         }
+        ImGui::SFML::Shutdown();
     }
 
 private:
+    void renderGUI() {
+        if (ImGui::BeginMainMenuBar()) {
+            if (ImGui::BeginMenu("View")) {
+                ImGui::EndMenu();
+            }
+
+            // Display current page number
+            ImGui::Text("Page: %d/%d", current_page + 1, fz_count_pages(ctx, doc));
+
+            ImGui::EndMainMenuBar();
+        }
+    }
     void handleEvent(const sf::Event& event) {
-        if (event.type == sf::Event::Closed)
+        if (event.is<sf::Event::Closed>()) {
             window.close();
-        else if (event.type == sf::Event::KeyPressed) {
-            switch (event.key.code) {
-            case sf::Keyboard::N:
-            case sf::Keyboard::Right:
+        } else if (const auto* keyPressed = event.getIf<sf::Event::KeyPressed>()) {
+            switch (keyPressed->scancode) {
+            case sf::Keyboard::Scancode::N:
+            case sf::Keyboard::Scancode::Right:
                 nextPage();
                 break;
-            case sf::Keyboard::P:
-            case sf::Keyboard::Left:
+            case sf::Keyboard::Scancode::P:
+            case sf::Keyboard::Scancode::Left:
                 previousPage();
                 break;
-            case sf::Keyboard::Up:
+            case sf::Keyboard::Scancode::Up:
                 zoom *= 1.2f;
                 renderPage();
                 break;
-            case sf::Keyboard::Down:
+            case sf::Keyboard::Scancode::Down:
                 zoom /= 1.2f;
                 renderPage();
                 break;
-            case sf::Keyboard::Q:
+            case sf::Keyboard::Scancode::Q:
                 window.close();
                 break;
-            case sf::Keyboard::W:
-				fitPage();
+            case sf::Keyboard::Scancode::W:
+                fitPage();
+                renderPage();
+                break;
+            case sf::Keyboard::Scancode::D:
+                dual_mode = !dual_mode;
                 renderPage();
                 break;
             }
-        } else if (event.type == sf::Event::Resized) {
-            sf::FloatRect visibleArea(0, 0, event.size.width, event.size.height);
+        } else if (const auto* ev = event.getIf<sf::Event::Resized>()) {
+            sf::FloatRect visibleArea({ 0, 0 }, { (float)ev->size.x, (float)ev->size.y });
             window.setView(sf::View(visibleArea));
             renderPage();
-        } else if (event.type == sf::Event::MouseWheelMoved) {
-            if (event.mouseWheel.delta < 0) {
+        } else if (const auto* mouseWheel = event.getIf<sf::Event::MouseWheelScrolled>()) {
+            if (mouseWheel->delta < 0) {
                 zoom /= 1.2f;
                 renderPage();
             } else {
