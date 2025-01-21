@@ -13,13 +13,21 @@
 #include <mupdf/fitz/geometry.h>
 #include <mupdf/fitz/outline.h>
 
+struct TOCEntry {
+    std::string title, uri;
+    int level;
+};
+
 class PDFViewer {
 private:
-    int current_page, page_count;
-    float zoom;
+    const char* filename;
+
+    int current_page = 0, page_count;
+    float zoom = 1.0f;
     sf::RenderWindow window;
     sf::Texture page_texture;
     sf::Sprite* page_sprite;
+    std::vector<TOCEntry> toc;
     unsigned char* pixels = nullptr;
 
     bool dual_mode = false;
@@ -48,34 +56,18 @@ public:
         }
     }
 
-    void print_outline(fz_context* ctx, fz_outline* outline, int level) {
+    void load_outline(fz_context* ctx, fz_outline* outline, int level) {
         while (outline) {
-            for (int i = 0; i < level; i++) {
-                printf("  ");
-            }
-
-            // Print the title and URI of the outline item
-            printf("%s", outline->title ? outline->title : "No Title");
-            if (outline->uri) {
-                printf(" -> %s", outline->uri);
-            }
-            printf("\n");
-
-            // Recursively print the child items
+            toc.push_back({ outline->title, outline->uri, level });
             if (outline->down) {
-                print_outline(ctx, outline->down, level + 1);
+                load_outline(ctx, outline->down, level + 1);
             }
-
-            // Move to the next item at the same level
             outline = outline->next;
         }
     }
 
     PDFViewer(const char* filename)
-        : current_page(0)
-        , zoom(1.0f) {
-
-        /* Create a context to hold the exception stack and various caches. */
+        : filename { filename } {
         ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
         if (!ctx) {
             throw std::runtime_error("cannot create mupdf context\n");
@@ -92,8 +84,7 @@ public:
 
         /* Open the document. */
         fz_try(ctx)
-            doc
-            = fz_open_document(ctx, "/home/kjc/closet/library/Iain E. Richardson - H264 (2nd edition).pdf");
+            doc = fz_open_document(ctx, filename);
         fz_catch(ctx) {
             fz_report_error(ctx);
             fz_drop_context(ctx);
@@ -118,7 +109,7 @@ public:
         fz_catch(ctx) {
             throw std::runtime_error("cannot load table of contents\n");
         }
-        print_outline(ctx, outline, 0);
+        load_outline(ctx, outline, 0);
         fz_drop_outline(ctx, outline);
     }
 
@@ -242,16 +233,30 @@ public:
 private:
     void renderGUI() {
         if (ImGui::BeginMainMenuBar()) {
-            if (ImGui::BeginMenu("View")) {
+            if (ImGui::BeginMenu("Table of Contents")) {
+                for (const auto& entry : toc) {
+                    ImGui::SetCursorPosX(20.0f * (entry.level + 1));
+
+                    if (ImGui::MenuItem(entry.title.c_str())) {
+                        assert(entry.uri.starts_with("#page="));
+                        current_page = std::stoi(entry.uri.substr(6)) - 1;
+                        renderPage();
+                    }
+                }
                 ImGui::EndMenu();
             }
 
-            // Display current page number
-            ImGui::Text("Page: %d/%d", current_page + 1, fz_count_pages(ctx, doc));
+            ImGui::Text("Page: %d/%d", current_page + 1, page_count);
+
+            float rightAlignPos = ImGui::GetWindowWidth() - ImGui::CalcTextSize(filename).x - ImGui::GetStyle().ItemSpacing.x;
+            ImGui::SameLine();
+            ImGui::SetCursorPosX(rightAlignPos);
+            ImGui::Text("%s", filename);
 
             ImGui::EndMainMenuBar();
         }
     }
+
     void handleEvent(const sf::Event& event) {
         if (event.is<sf::Event::Closed>()) {
             window.close();
@@ -289,15 +294,16 @@ private:
             sf::FloatRect visibleArea({ 0, 0 }, { (float)ev->size.x, (float)ev->size.y });
             window.setView(sf::View(visibleArea));
             renderPage();
-        } else if (const auto* mouseWheel = event.getIf<sf::Event::MouseWheelScrolled>()) {
-            if (mouseWheel->delta < 0) {
-                zoom /= 1.2f;
-                renderPage();
-            } else {
-                zoom *= 1.2f;
-                renderPage();
-            }
         }
+        // else if (const auto* mouseWheel = event.getIf<sf::Event::MouseWheelScrolled>()) {
+        //     if (mouseWheel->delta < 0) {
+        //         zoom /= 1.2f;
+        //         renderPage();
+        //     } else {
+        //         zoom *= 1.2f;
+        //         renderPage();
+        //     }
+        // }
     }
 
     void nextPage() {
