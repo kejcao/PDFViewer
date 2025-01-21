@@ -12,11 +12,11 @@
 #include <mupdf/fitz/document.h>
 #include <mupdf/fitz/geometry.h>
 #include <mupdf/fitz/outline.h>
+#include <stdexcept>
 
-struct TOCEntry {
-    std::string title, uri;
-    int level;
-};
+#include "backends/backend.h"
+#include "backends/cbz.h"
+#include "backends/pdf.h"
 
 class PDFViewer {
 private:
@@ -27,13 +27,12 @@ private:
     sf::RenderWindow window;
     sf::Texture page_texture;
     sf::Sprite* page_sprite;
-    std::vector<TOCEntry> toc;
-    unsigned char* pixels = nullptr;
 
     bool dual_mode = false;
 
-    fz_context* ctx;
-    fz_document* doc;
+    std::vector<TOCEntry> toc;
+
+    Backend* backend;
 
 public:
     sf::Vector2f lastMousePos;
@@ -56,140 +55,37 @@ public:
         }
     }
 
-    void load_outline(fz_context* ctx, fz_outline* outline, int level) {
-        while (outline) {
-            toc.push_back({ outline->title, outline->uri, level });
-            if (outline->down) {
-                load_outline(ctx, outline->down, level + 1);
-            }
-            outline = outline->next;
-        }
-    }
-
     PDFViewer(const char* filename)
         : filename { filename } {
-        ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
-        if (!ctx) {
-            throw std::runtime_error("cannot create mupdf context\n");
+
+        std::string s = filename;
+        if (s.ends_with(".pdf")) {
+            backend = new PDF(filename);
+        } else if (s.ends_with(".cbz")) {
+            backend = new CBZ(filename);
+        } else {
+            throw std::runtime_error("error: unknown file extension");
         }
 
-        /* Register the default file types to handle. */
-        fz_try(ctx)
-            fz_register_document_handlers(ctx);
-        fz_catch(ctx) {
-            fz_report_error(ctx);
-            fz_drop_context(ctx);
-            throw std::runtime_error("cannot register document handlers\n");
-        }
-
-        /* Open the document. */
-        fz_try(ctx)
-            doc = fz_open_document(ctx, filename);
-        fz_catch(ctx) {
-            fz_report_error(ctx);
-            fz_drop_context(ctx);
-            throw std::runtime_error("cannot open document\n");
-        }
-
-        /* Count the number of pages. */
-        fz_try(ctx)
-            page_count
-            = fz_count_pages(ctx, doc);
-        fz_catch(ctx) {
-            fz_report_error(ctx);
-            fz_drop_document(ctx, doc);
-            fz_drop_context(ctx);
-            throw std::runtime_error("cannot count number of pages\n");
-        }
-
-        fz_outline* outline;
-        fz_try(ctx) {
-            outline = fz_load_outline(ctx, doc);
-        }
-        fz_catch(ctx) {
-            throw std::runtime_error("cannot load table of contents\n");
-        }
-        load_outline(ctx, outline, 0);
-        fz_drop_outline(ctx, outline);
-    }
-
-    ~PDFViewer() {
-        fz_drop_document(ctx, doc);
-        fz_drop_context(ctx);
+        toc = backend->load_outline();
+        page_count = backend->count_pages();
     }
 
     void fitPage() {
         auto [wx, wy] = window.getSize();
-        fz_page* page = fz_load_page(ctx, doc, current_page);
-        fz_rect bbox = fz_bound_page(ctx, page);
-        fz_drop_page(ctx, page);
+        auto [pw, ph] = backend->size(current_page);
 
-        if (bbox.x1 / bbox.y1 < (float)wx / wy) {
-            zoom = wy / bbox.y1;
+        if ((float)pw / ph < (float)wx / wy) {
+            zoom = (float)wy / ph - .1;
         } else {
-            zoom = wx / bbox.x1;
+            zoom = (float)wx / pw - .1;
         }
-    }
-
-    fz_pixmap* getPixmap(int page_number) {
-        fz_pixmap* pix;
-
-        // render page to an RGB pixmap
-        fz_try(ctx) {
-            fz_matrix ctm;
-            ctm = fz_scale(zoom, zoom);
-            ctm = fz_pre_rotate(ctm, 0);
-
-            pix = fz_new_pixmap_from_page_number(ctx, doc, page_number, ctm, fz_device_rgb(ctx), 0);
-        }
-        fz_catch(ctx) {
-            fz_report_error(ctx);
-            fz_drop_document(ctx, doc);
-            fz_drop_context(ctx);
-            throw std::runtime_error("cannot render page\n");
-        }
-
-        return pix;
     }
 
     void renderPage() {
-        std::vector<fz_pixmap*> pixmaps = {};
-        pixmaps.push_back(getPixmap(current_page));
-        if (dual_mode) {
-            pixmaps.push_back(getPixmap(current_page + 1));
-        }
+        sf::Image img = backend->render_page(current_page, zoom);
 
-        if (pixels != nullptr)
-            delete[] pixels;
-        unsigned int width = 0, height = 0;
-        for (int i = 0; i < pixmaps.size(); ++i) {
-            if (pixmaps[i]->h > height) {
-                height = pixmaps[i]->h;
-            }
-            width += pixmaps[i]->w;
-        }
-        std::cout << width << " " << height << "\n";
-        pixels = new unsigned char[width * height * 4];
-
-        int i = 0;
-        for (int y = 0; y < height; ++y) {
-            for (auto pix : pixmaps) {
-                unsigned char* p = &pix->samples[y * pix->stride];
-
-                for (int x = 0; x < pix->w; ++x) {
-                    pixels[i * 4 + 0] = p[0];
-                    pixels[i * 4 + 1] = p[1];
-                    pixels[i * 4 + 2] = p[2];
-                    pixels[i * 4 + 3] = 255;
-
-                    p += pix->n;
-                    i += 1;
-                }
-            }
-        }
-
-        page_texture = sf::Texture({ width, height });
-        page_texture.update(pixels);
+        page_texture = sf::Texture(img);
         page_sprite = new sf::Sprite(page_texture);
 
         auto [tx, ty] = page_texture.getSize();
@@ -198,9 +94,6 @@ public:
             (wx - tx) / 2.0f,
             (wy - ty) / 2.0f,
         });
-
-        for (auto* pix : pixmaps)
-            fz_drop_pixmap(ctx, pix);
     }
 
     void run() {
@@ -222,7 +115,7 @@ public:
             updatePanning();
             renderGUI();
 
-            window.clear(sf::Color::White);
+            window.clear(sf::Color::Black);
             window.draw(*page_sprite);
             ImGui::SFML::Render(window);
             window.display();
