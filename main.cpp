@@ -4,6 +4,10 @@
 #include <SFML/Graphics.hpp>
 #include <iostream>
 #include <mupdf/fitz.h>
+#include <mupdf/fitz/color.h>
+#include <mupdf/fitz/context.h>
+#include <mupdf/fitz/document.h>
+#include <mupdf/fitz/geometry.h>
 
 class PDFViewer {
 private:
@@ -12,8 +16,9 @@ private:
     sf::RenderWindow window;
     sf::Texture page_texture;
     sf::Sprite page_sprite;
-    fz_pixmap* pix = nullptr;
     sf::Uint8* pixels = nullptr;
+
+    bool dual_mode = true;
 
     fz_context* ctx;
     fz_document* doc;
@@ -40,7 +45,7 @@ public:
     }
 
     PDFViewer(const char* filename)
-        : current_page(0)
+        : current_page(2)
         , zoom(100.0f) {
 
         /* Create a context to hold the exception stack and various caches. */
@@ -85,23 +90,27 @@ public:
         fz_drop_context(ctx);
     }
 
-    void renderPage() {
-        fz_matrix ctm;
+    fz_pixmap* getPixmap(int page_number) {
+        auto [wx, wy] = window.getSize();
+        fz_pixmap* pix;
 
-        /* Compute a transformation matrix for the zoom and rotation desired. */
-        /* The default resolution without scaling is 72 dpi. */
-        ctm = fz_scale(zoom / 100, zoom / 100);
-        ctm = fz_pre_rotate(ctm, 0);
+        // render page to an RGB pixmap
+        fz_try(ctx) {
+            fz_page* page = fz_load_page(ctx, doc, page_number);
+            fz_rect bbox = fz_bound_page(ctx, page);
+            fz_drop_page(ctx, page);
 
-        /* Render page to an RGB pixmap. */
-        if (pix != nullptr) {
-            fz_drop_pixmap(ctx, pix);
-            delete[] pixels;
+            if (bbox.x1 / bbox.y1 < (float)wx / wy) {
+                zoom = wy / bbox.y1;
+            } else {
+                zoom = wx / bbox.x1;
+            }
+            fz_matrix ctm;
+            ctm = fz_scale(zoom, zoom);
+            ctm = fz_pre_rotate(ctm, 0);
+
+            pix = fz_new_pixmap_from_page_number(ctx, doc, page_number, ctm, fz_device_rgb(ctx), 0);
         }
-
-        fz_try(ctx)
-            pix
-            = fz_new_pixmap_from_page_number(ctx, doc, current_page, ctm, fz_device_rgb(ctx), 0);
         fz_catch(ctx) {
             fz_report_error(ctx);
             fz_drop_document(ctx, doc);
@@ -109,32 +118,55 @@ public:
             throw std::runtime_error("cannot render page\n");
         }
 
-        pixels = new sf::Uint8[pix->w * pix->h * 4];
+        return pix;
+    }
+
+    void renderPage() {
+        std::vector<fz_pixmap*> pixmaps = {};
+        pixmaps.push_back(getPixmap(current_page));
+        if (dual_mode) {
+            pixmaps.push_back(getPixmap(current_page + 1));
+        }
+
+        if (pixels != nullptr)
+            delete[] pixels;
+        int width = 0, height = pixmaps[0]->h;
+        for (int i = 0; i < pixmaps.size(); ++i) {
+            assert(pixmaps[i]->h == pixmaps[(i + 1) % pixmaps.size()]->h);
+            width += pixmaps[i]->w;
+        }
+        pixels = new sf::Uint8[width * height * 4];
 
         int i = 0;
-        for (int y = 0; y < pix->h; ++y) {
-            unsigned char* p = &pix->samples[y * pix->stride];
-            for (int x = 0; x < pix->w; ++x) {
-                pixels[i * 4 + 0] = (sf::Uint8)p[0];
-                pixels[i * 4 + 1] = (sf::Uint8)p[1];
-                pixels[i * 4 + 2] = (sf::Uint8)p[2];
-                pixels[i * 4 + 3] = 255;
-                p += pix->n;
-                i += 1;
+        for (int y = 0; y < height; ++y) {
+            for (auto pix : pixmaps) {
+                unsigned char* p = &pix->samples[y * pix->stride];
+
+                for (int x = 0; x < pix->w; ++x) {
+                    pixels[i * 4 + 0] = (sf::Uint8)p[0];
+                    pixels[i * 4 + 1] = (sf::Uint8)p[1];
+                    pixels[i * 4 + 2] = (sf::Uint8)p[2];
+                    pixels[i * 4 + 3] = 255;
+
+                    p += pix->n;
+                    i += 1;
+                }
             }
         }
 
-        page_texture.create(pix->w, pix->h);
+        page_texture.create(width, height);
         page_texture.update(pixels);
-
         page_sprite = sf::Sprite();
         page_sprite.setTexture(page_texture);
 
-        auto [wx, wy] = window.getSize();
         auto [tx, ty] = page_texture.getSize();
+        auto [wx, wy] = window.getSize();
         page_sprite.setPosition(
             (wx - tx) / 2.0f,
             (wy - ty) / 2.0f);
+
+        for (auto* pix : pixmaps)
+            fz_drop_pixmap(ctx, pix);
     }
 
     void run() {
@@ -185,19 +217,39 @@ private:
             sf::FloatRect visibleArea(0, 0, event.size.width, event.size.height);
             window.setView(sf::View(visibleArea));
             renderPage();
+        } else if (event.type == sf::Event::MouseWheelMoved) {
+            if (event.mouseWheel.delta < 0) {
+                zoom /= 1.2f;
+                renderPage();
+            } else {
+                zoom *= 1.2f;
+                renderPage();
+            }
         }
     }
 
     void nextPage() {
-        if (current_page + 1 < page_count) {
-            current_page += 1;
+        if (dual_mode) {
+            if (current_page + 2 < page_count) {
+                current_page += 2;
+            }
+        } else {
+            if (current_page + 1 < page_count) {
+                current_page += 1;
+            }
         }
         renderPage();
     }
 
     void previousPage() {
-        if (current_page > 0) {
-            current_page -= 1;
+        if (dual_mode) {
+            if (current_page > 1) {
+                current_page -= 2;
+            }
+        } else {
+            if (current_page > 0) {
+                current_page -= 1;
+            }
         }
         renderPage();
     }
