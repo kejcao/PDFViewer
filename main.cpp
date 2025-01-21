@@ -46,7 +46,7 @@ public:
 
     PDFViewer(const char* filename)
         : current_page(2)
-        , zoom(100.0f) {
+        , zoom(1.0f) {
 
         /* Create a context to hold the exception stack and various caches. */
         ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
@@ -90,21 +90,24 @@ public:
         fz_drop_context(ctx);
     }
 
-    fz_pixmap* getPixmap(int page_number) {
+    void fitPage() {
         auto [wx, wy] = window.getSize();
+        fz_page* page = fz_load_page(ctx, doc, current_page);
+        fz_rect bbox = fz_bound_page(ctx, page);
+        fz_drop_page(ctx, page);
+
+        if (bbox.x1 / bbox.y1 < (float)wx / wy) {
+            zoom = wy / bbox.y1;
+        } else {
+            zoom = wx / bbox.x1;
+        }
+    }
+
+    fz_pixmap* getPixmap(int page_number) {
         fz_pixmap* pix;
 
         // render page to an RGB pixmap
         fz_try(ctx) {
-            fz_page* page = fz_load_page(ctx, doc, page_number);
-            fz_rect bbox = fz_bound_page(ctx, page);
-            fz_drop_page(ctx, page);
-
-            if (bbox.x1 / bbox.y1 < (float)wx / wy) {
-                zoom = wy / bbox.y1;
-            } else {
-                zoom = wx / bbox.x1;
-            }
             fz_matrix ctm;
             ctm = fz_scale(zoom, zoom);
             ctm = fz_pre_rotate(ctm, 0);
@@ -211,6 +214,10 @@ private:
                 break;
             case sf::Keyboard::Q:
                 window.close();
+                break;
+            case sf::Keyboard::W:
+				fitPage();
+                renderPage();
                 break;
             }
         } else if (event.type == sf::Event::Resized) {
