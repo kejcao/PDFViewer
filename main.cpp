@@ -89,7 +89,6 @@ public:
             throw std::runtime_error("cannot render page\n");
         }
 
-        std::cout << pix->w << " " << pix->h << std::endl;
         pixels = new sf::Uint8[pix->w * pix->h * 4];
 
         int i = 0;
@@ -107,11 +106,20 @@ public:
 
         page_texture.create(pix->w, pix->h);
         page_texture.update(pixels);
+
+        page_sprite = sf::Sprite();
         page_sprite.setTexture(page_texture);
+
+        auto [wx, wy] = window.getSize();
+        auto [tx, ty] = page_texture.getSize();
+        page_sprite.setPosition(
+            (wx - tx) / 2.0f,
+            (wy - ty) / 2.0f);
     }
 
     void run() {
         window.create(sf::VideoMode(800, 600), "PDF Viewer");
+        renderPage();
 
         while (window.isOpen()) {
             sf::Event event;
@@ -132,16 +140,18 @@ private:
         else if (event.type == sf::Event::KeyPressed) {
             switch (event.key.code) {
             case sf::Keyboard::N:
+            case sf::Keyboard::Right:
                 nextPage();
                 break;
             case sf::Keyboard::P:
+            case sf::Keyboard::Left:
                 previousPage();
                 break;
-            case sf::Keyboard::Add:
+            case sf::Keyboard::Up:
                 zoom *= 1.2f;
                 renderPage();
                 break;
-            case sf::Keyboard::Subtract:
+            case sf::Keyboard::Down:
                 zoom /= 1.2f;
                 renderPage();
                 break;
@@ -149,6 +159,10 @@ private:
                 window.close();
                 break;
             }
+        } else if (event.type == sf::Event::Resized) {
+            sf::FloatRect visibleArea(0, 0, event.size.width, event.size.height);
+            window.setView(sf::View(visibleArea));
+            renderPage();
         }
     }
 
@@ -169,13 +183,12 @@ private:
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cout << "Usage: " << argv[0] << " <pdf_file>" << std::endl;
+        std::cout << "USAGE: " << argv[0] << " <pdf_file>" << std::endl;
         return 1;
     }
 
     try {
         PDFViewer viewer(argv[1]);
-        viewer.renderPage();
         viewer.run();
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
