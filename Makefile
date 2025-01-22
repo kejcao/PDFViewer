@@ -1,6 +1,6 @@
 pdf: imgui imgui-sfml SFML main.cpp backends/*
 	g++ -std=c++20 -ISFML/include -Iimgui -Iimgui-sfml \
-		-lmupdf -larchive -lGL -lX11 -lXrandr -ludev -lXcursor -lXi \
+		-lmupdf -lzip -lGL -lX11 -lXrandr -ludev -lXcursor -lXi \
 		main.cpp \
 		imgui/imgui.cpp \
 		imgui/imgui_draw.cpp \

@@ -117,6 +117,10 @@ private:
     void renderGUI() {
         if (ImGui::BeginMainMenuBar()) {
             if (ImGui::BeginMenu("Table of Contents")) {
+				if (toc.empty()) {
+					ImGui::MenuItem("Empty... file has no TOC");
+				}
+
                 for (const auto& entry : toc) {
                     ImGui::SetCursorPosX(20.0f * (entry.level + 1));
 

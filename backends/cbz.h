@@ -1,53 +1,63 @@
 #include "backend.h"
 
-#include <archive.h>
-#include <archive_entry.h>
+#include <algorithm>
 #include <stdexcept>
 #include <string>
+#include <zip.h>
 
 #pragma once
 
 class CBZ : public Backend {
 private:
-    struct archive* a;
-    struct archive_entry* entry;
-
-    std::vector<std::pair<std::string, sf::Image>> pages;
+    std::vector<std::string> pages;
+    zip_t* zip;
 
 public:
     ~CBZ() {
-        archive_read_close(a);
-        archive_read_free(a);
+        zip_close(zip);
     }
 
     CBZ(const char* filename) {
-        a = archive_read_new();
-        archive_read_support_filter_all(a);
-        archive_read_support_format_zip(a);
-
-        int r = archive_read_open_filename(a, filename, 10240);
-        if (r != ARCHIVE_OK) {
-            throw std::runtime_error("Error: " + std::string(archive_error_string(a)));
+        int err = 0;
+        zip = zip_open(filename, ZIP_RDONLY, &err);
+        if (zip == NULL) {
+            throw std::runtime_error(
+                "Failed to open cbz file: error " + std::to_string(err));
         }
 
-        while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
-            std::string fp = archive_entry_pathname(entry);
-            std::vector<unsigned char> stream;
-            const void* buff;
-            size_t size;
-            la_int64_t offset;
-            while (archive_read_data_block(a, &buff, &size, &offset) == ARCHIVE_OK) {
-                stream.insert(stream.end(), (char*)buff, (char*)buff + size);
-            }
-            if (stream.size() > 0 && (fp.ends_with(".jpg") || fp.ends_with(".jpeg") || fp.ends_with(".png"))) {
-                std::cout << fp << " " << stream.size() << std::endl;
-                pages.push_back({ fp, sf::Image((void*)stream.data(), stream.size()) });
+        for (zip_int64_t i = 0; i < zip_get_num_entries(zip, 0); ++i) {
+            std::string fp = zip_get_name(zip, i, 0);
+            if (fp.ends_with(".jpg") || fp.ends_with(".png") || fp.ends_with(".jpeg")) { // not robust at all!!!
+				std::cout << fp << std::endl;
+                pages.push_back(fp);
             }
         }
+        std::sort(pages.begin(), pages.end());
     }
 
-	sf::Image render_page(int page_number) override {
-        return pages[page_number].second;
+    sf::Image render_page(int page_number) override {
+        zip_int64_t index = zip_name_locate(zip, pages[page_number].c_str(), 0);
+        zip_file_t* file = zip_fopen_index(zip, index, 0);
+
+        char buffer[4096];
+        zip_int64_t total_read = 0;
+        zip_int64_t bytes_read;
+        char* content = NULL;
+        size_t content_size = 0;
+
+        while ((bytes_read = zip_fread(file, buffer, sizeof(buffer))) > 0) {
+            char* new_content = (char*)realloc(content, content_size + bytes_read);
+            content = new_content;
+            memcpy(content + content_size, buffer, bytes_read);
+            content_size += bytes_read;
+            total_read += bytes_read;
+        }
+
+        zip_fclose(file);
+
+        auto res = sf::Image(content, content_size);
+        free(content);
+        return res;
     }
 
     int count_pages() override {
