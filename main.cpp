@@ -145,8 +145,7 @@ private:
                     ImGui::SetCursorPosX(20.0f * (entry.level + 1));
 
                     if (ImGui::MenuItem(entry.title.c_str())) {
-                        assert(entry.uri.starts_with("#page="));
-                        current_page = std::stoi(entry.uri.substr(6)) - 1;
+						current_page = backend->resolve(entry.uri);
                         renderPage();
                     }
                 }

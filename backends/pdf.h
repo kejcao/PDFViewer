@@ -52,7 +52,7 @@ public:
         return { bbox.x1, bbox.y1 };
     }
 
-	sf::Image render_page(int page_number, float zoom) override {
+    sf::Image render_page(int page_number, float zoom) override {
         fz_pixmap* pix;
 
         // render page to an RGB pixmap
@@ -87,8 +87,8 @@ public:
         }
         unsigned int w = pix->w;
         unsigned int h = pix->h;
-		auto ret = sf::Image({ w, h }, pixels);
-		delete[] pixels;
+        auto ret = sf::Image({ w, h }, pixels);
+        delete[] pixels;
         fz_drop_pixmap(ctx, pix);
 
         return ret;
@@ -155,6 +155,11 @@ public:
 
         return toc;
     }
+
+    int resolve(std::string uri) override {
+		fz_link_dest dest = fz_resolve_link_dest(ctx, doc, uri.c_str());
+		return dest.loc.page;
+	}
 
     int count_pages() override {
         return page_count;
