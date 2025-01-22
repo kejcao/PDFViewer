@@ -46,7 +46,7 @@ public:
         }
     }
 
-    sf::Image render_page(int page_number, float zoom) override {
+	std::optional<sf::Image> render_page(int page_number, float zoom) override {
         return pages[page_number].second;
     }
 

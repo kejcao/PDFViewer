@@ -13,6 +13,7 @@
 #include <mupdf/fitz/geometry.h>
 #include <mupdf/fitz/outline.h>
 #include <stdexcept>
+#include <thread>
 
 #include "SFML/Window/Mouse.hpp"
 #include "backends/backend.h"
@@ -121,9 +122,20 @@ public:
     }
 
     void renderPage() {
-        sf::Image img = backend->render_page(current_page, 2);
+        auto render = [this](int page) {
+            do {
+                auto res = backend->render_page(page, 2);
+                if (res.has_value()) {
+                    return res.value();
+                }
+				using namespace std::chrono_literals;
+				std::this_thread::sleep_for(20ms);
+            } while (true);
+        };
+
+        sf::Image img = render(current_page);
         if (dual_mode) {
-            img = concatImagesHorizontally(img, backend->render_page(current_page + 1, 2));
+            img = concatImagesHorizontally(img, render(current_page + 1));
         }
 
         page_texture = sf::Texture(img);
@@ -213,6 +225,7 @@ private:
                 return;
             switch (keyPressed->scancode) {
             case sf::Keyboard::Scancode::N:
+            case sf::Keyboard::Scancode::Space:
             case sf::Keyboard::Scancode::Right:
                 nextPage();
                 break;
