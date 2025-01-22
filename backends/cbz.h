@@ -46,12 +46,8 @@ public:
         }
     }
 
-	std::optional<sf::Image> render_page(int page_number, float zoom) override {
+	std::optional<sf::Image> render_page(int page_number) override {
         return pages[page_number].second;
-    }
-
-    std::pair<int, int> size(int page_number) override {
-        return { 200, 200 };
     }
 
     int count_pages() override {

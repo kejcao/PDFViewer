@@ -5,16 +5,13 @@
 #pragma once
 
 struct TOCEntry {
-    std::string title, uri;
-    int level;
+    std::string title;
+    int page, level;
 };
 
 class Backend {
 public:
-    virtual std::optional<sf::Image> render_page(int page_number, float zoom) = 0;
     virtual std::vector<TOCEntry> load_outline() { return {}; };
-    virtual int resolve(std::string uri) { return 0; };
-    virtual std::pair<int, int> size(int page_number) = 0;
-    virtual void init() {};
+    virtual std::optional<sf::Image> render_page(int page_number) = 0;
     virtual int count_pages() = 0;
 };

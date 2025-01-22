@@ -23,32 +23,13 @@ void fail(std::string msg) {
 
 class PDF : public Backend {
 private:
-    fz_context* ctx;
-    fz_document* doc;
     const char* filename;
 
-    std::thread render;
+    std::thread init_thread;
 
-    int page_count;
+    int page_count = -1;
     std::unordered_map<int, sf::Image> pages;
-
-public:
-    ~PDF() {
-        render.join();
-        fz_drop_document(ctx, doc);
-        fz_drop_context(ctx);
-    }
-
-    std::pair<int, int> size(int page_number) override {
-        fz_page* page = fz_load_page(ctx, doc, page_number);
-        fz_rect bbox = fz_bound_page(ctx, page);
-        fz_drop_page(ctx, page);
-        return { bbox.x1, bbox.y1 };
-    }
-
-    std::optional<sf::Image> render_page(int page_number, float zoom) override {
-        return pages.contains(page_number) ? std::optional(pages[page_number]) : std::nullopt;
-    }
+    std::vector<TOCEntry> toc;
 
     // We have to abide by mupdf's C threading API. Hence no std::thread.
     void populate_pages() {
@@ -152,17 +133,33 @@ public:
         };
 
         // Reuse these in constructor?
-        fz_context* render_ctx = fz_new_context(NULL, &locks, FZ_STORE_UNLIMITED);
-        fz_document* render_doc = NULL;
+        fz_context* ctx = fz_new_context(NULL, &locks, FZ_STORE_UNLIMITED);
+        fz_document* doc = NULL;
 
         pthread_t* threads = NULL;
 
         fz_var(threads);
-        fz_var(render_doc);
+        fz_var(doc);
 
-        fz_try(render_ctx) {
-            fz_register_document_handlers(render_ctx);
-            render_doc = fz_open_document(render_ctx, filename);
+        fz_try(ctx) {
+            fz_register_document_handlers(ctx);
+            doc = fz_open_document(ctx, filename);
+
+            auto load_outline = [&, this](auto& me, fz_outline* outline, int level) -> void {
+                while (outline) {
+                    fz_link_dest dest = fz_resolve_link_dest(ctx, doc, outline->uri);
+                    toc.push_back({ outline->title, dest.loc.page, level });
+                    if (outline->down) {
+                        me(me, outline->down, level + 1);
+                    }
+                    outline = outline->next;
+                }
+            };
+            fz_outline* outline = fz_load_outline(ctx, doc);
+            load_outline(load_outline, outline, 0);
+            fz_drop_outline(ctx, outline);
+
+            page_count = fz_count_pages(ctx, doc);
 
             threads = (pthread_t*)malloc(page_count * sizeof(*threads));
 
@@ -175,32 +172,32 @@ public:
                 struct thread_data* data;
 
                 fz_var(dev);
-                fz_try(render_ctx) {
+                fz_try(ctx) {
                     const float dpi_scale_factor = 144.0 / 72; // 144 dpi
 
                     // we create a display list that will hold drawing commands
                     // for page. only one thread at a time can ever be
                     // accessing the document.
-                    page = fz_load_page(render_ctx, render_doc, i);
+                    page = fz_load_page(ctx, doc, i);
 
-                    bbox = fz_bound_page(render_ctx, page);
+                    bbox = fz_bound_page(ctx, page);
                     bbox = fz_transform_rect(bbox, fz_scale(dpi_scale_factor, dpi_scale_factor));
 
-                    list = fz_new_display_list(render_ctx, bbox);
+                    list = fz_new_display_list(ctx, bbox);
 
-                    dev = fz_new_list_device(render_ctx, list);
-                    fz_run_page(render_ctx, page, dev, fz_scale(dpi_scale_factor, dpi_scale_factor), NULL);
-                    fz_close_device(render_ctx, dev);
+                    dev = fz_new_list_device(ctx, list);
+                    fz_run_page(ctx, page, dev, fz_scale(dpi_scale_factor, dpi_scale_factor), NULL);
+                    fz_close_device(ctx, dev);
                 }
-                fz_always(render_ctx) {
-                    fz_drop_device(render_ctx, dev);
-                    fz_drop_page(render_ctx, page);
+                fz_always(ctx) {
+                    fz_drop_device(ctx, dev);
+                    fz_drop_page(ctx, page);
                 }
-                fz_catch(render_ctx)
-                    fz_rethrow(render_ctx);
+                fz_catch(ctx)
+                    fz_rethrow(ctx);
 
                 data = new (struct thread_data) {
-                    .ctx = render_ctx,
+                    .ctx = ctx,
                     .page_number = i + 1,
                     .list = list,
                     .bbox = bbox,
@@ -217,63 +214,23 @@ public:
                     throw std::runtime_error("pthread_join");
                 pages[i] = data->result_image;
 
-                fz_drop_display_list(render_ctx, data->list);
+                fz_drop_display_list(ctx, data->list);
                 delete data;
             }
         }
-        fz_always(render_ctx) {
+        fz_always(ctx) {
             free(threads);
-            fz_drop_document(render_ctx, render_doc);
+            fz_drop_document(ctx, doc);
         }
-        fz_catch(render_ctx) {
-            fz_report_error(render_ctx);
+        fz_catch(ctx) {
+            fz_report_error(ctx);
             fail("error");
         }
 
-        fz_drop_context(render_ctx);
+        fz_drop_context(ctx);
     }
 
-    PDF(const char* filename)
-        : filename { filename } {
-        ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
-        if (!ctx) {
-            throw std::runtime_error("cannot create mupdf context\n");
-        }
-
-        /* Register the default file types to handle. */
-        fz_try(ctx)
-            fz_register_document_handlers(ctx);
-        fz_catch(ctx) {
-            fz_report_error(ctx);
-            fz_drop_context(ctx);
-            throw std::runtime_error("cannot register document handlers\n");
-        }
-
-        /* Open the document. */
-        fz_try(ctx)
-            doc
-            = fz_open_document(ctx, filename);
-        fz_catch(ctx) {
-            fz_report_error(ctx);
-            fz_drop_context(ctx);
-            throw std::runtime_error("cannot open document\n");
-        }
-
-        /* Count the number of pages. */
-        fz_try(ctx)
-            page_count
-            = fz_count_pages(ctx, doc);
-        fz_catch(ctx) {
-            fz_report_error(ctx);
-            fz_drop_document(ctx, doc);
-            fz_drop_context(ctx);
-            throw std::runtime_error("cannot count number of pages\n");
-        }
-
-        render = std::thread(&Backend::init, this);
-    }
-
-    void init() override {
+    void init() {
         auto now = []() {
             using namespace std::chrono;
             return duration_cast<milliseconds>(
@@ -286,34 +243,28 @@ public:
         std::cout << "time took to render pages: " << b - a << std::endl;
     }
 
-    std::vector<TOCEntry> load_outline() override {
-        std::vector<TOCEntry> toc;
-        auto load_outline = [&toc](auto& me, fz_context* ctx, fz_outline* outline, int level) -> void {
-            while (outline) {
-                toc.push_back({ outline->title, outline->uri, level });
-                if (outline->down) {
-                    me(me, ctx, outline->down, level + 1);
-                }
-                outline = outline->next;
-            }
-        };
-
-        fz_outline* outline;
-        fz_try(ctx)
-            outline
-            = fz_load_outline(ctx, doc);
-        fz_catch(ctx) {
-            throw std::runtime_error("cannot load table of contents\n");
-        }
-        load_outline(load_outline, ctx, outline, 0);
-        fz_drop_outline(ctx, outline);
-
-        return toc;
+public:
+    ~PDF() {
+        init_thread.join();
     }
 
-    int resolve(std::string uri) override {
-        fz_link_dest dest = fz_resolve_link_dest(ctx, doc, uri.c_str());
-        return dest.loc.page;
+    PDF(const char* filename)
+        : filename { filename } {
+        init_thread = std::thread(&PDF::init, this);
+
+        // Wait until init thread is done loading basic information
+        while (page_count == -1) {
+            using namespace std::chrono_literals;
+            std::this_thread::sleep_for(10ms);
+        }
+    }
+
+    std::optional<sf::Image> render_page(int page_number) override {
+        return pages.contains(page_number) ? std::optional(pages[page_number]) : std::nullopt;
+    }
+
+    std::vector<TOCEntry> load_outline() override {
+        return toc;
     }
 
     int count_pages() override {

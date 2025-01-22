@@ -124,7 +124,7 @@ public:
     void renderPage() {
         auto render = [this](int page) {
             do {
-                auto res = backend->render_page(page, 2);
+                auto res = backend->render_page(page);
                 if (res.has_value()) {
                     return res.value();
                 }
@@ -190,7 +190,7 @@ private:
                     ImGui::SetCursorPosX(20.0f * (entry.level + 1));
 
                     if (ImGui::MenuItem(entry.title.c_str())) {
-                        current_page = backend->resolve(entry.uri);
+                        current_page = entry.page;
                         if (dual_mode && current_page % 2 == 1) {
                             current_page -= 1;
                         }
