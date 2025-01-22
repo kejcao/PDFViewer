@@ -1,19 +1,8 @@
-// https://mupdf.readthedocs.io/en/latest/using-mupdf.html
-// https://mupdf.readthedocs.io/_/downloads/en/latest/pdf/
-// https://poe.com/chat/32am59gnfpdkuvwex7w
-
 #include <SFML/Graphics.hpp>
 #include <imgui-SFML.h>
 #include <imgui.h>
 #include <iostream>
-#include <mupdf/fitz.h>
-#include <mupdf/fitz/color.h>
-#include <mupdf/fitz/context.h>
-#include <mupdf/fitz/document.h>
-#include <mupdf/fitz/geometry.h>
-#include <mupdf/fitz/outline.h>
 #include <stdexcept>
-#include <thread>
 
 #include "SFML/Window/Mouse.hpp"
 #include "backends/backend.h"
@@ -35,7 +24,6 @@ private:
     std::vector<TOCEntry> toc;
     Backend* backend;
 
-public:
     sf::Vector2f lastMousePos;
     bool isPanning = false;
 
@@ -59,22 +47,6 @@ public:
         } else {
             isPanning = false;
         }
-    }
-
-    PDFViewer(const char* filename)
-        : filename { filename } {
-
-        std::string s = filename;
-        if (s.ends_with(".pdf")) {
-            backend = new PDF(filename);
-        } else if (s.ends_with(".cbz")) {
-            backend = new CBZ(filename);
-        } else {
-            throw std::runtime_error("error: unknown file extension");
-        }
-
-        toc = backend->load_outline();
-        page_count = backend->count_pages();
     }
 
     void fitPage() {
@@ -122,20 +94,9 @@ public:
     }
 
     void renderPage() {
-        auto render = [this](int page) {
-            do {
-                auto res = backend->render_page(page);
-                if (res.has_value()) {
-                    return res.value();
-                }
-				using namespace std::chrono_literals;
-				std::this_thread::sleep_for(20ms);
-            } while (true);
-        };
-
-        sf::Image img = render(current_page);
+        sf::Image img = backend->render_page(current_page);
         if (dual_mode) {
-            img = concatImagesHorizontally(img, render(current_page + 1));
+            img = concatImagesHorizontally(img, backend->render_page(current_page + 1));
         }
 
         page_texture = sf::Texture(img);
@@ -153,36 +114,6 @@ public:
         });
     }
 
-    void run() {
-        sf::ContextSettings settings { .antiAliasingLevel = 8 };
-        window.create(sf::VideoMode({ 800, 600 }), "PDF Viewer", sf::Style::Default, sf::State::Windowed, settings);
-        window.setVerticalSyncEnabled(true);
-        window.setFramerateLimit(60);
-        auto _ = ImGui::SFML::Init(window);
-        renderPage();
-
-        sf::Clock deltaClock;
-        while (window.isOpen()) {
-            while (const std::optional event = window.pollEvent()) {
-                if (event.has_value()) {
-                    ImGui::SFML::ProcessEvent(window, event.value());
-                    handleEvent(event.value());
-                }
-            }
-            ImGui::SFML::Update(window, deltaClock.restart());
-
-            updatePanning();
-            renderGUI();
-
-            window.clear(sf::Color::Black);
-            window.draw(*page_sprite);
-            ImGui::SFML::Render(window);
-            window.display();
-        }
-        ImGui::SFML::Shutdown();
-    }
-
-private:
     void renderGUI() {
         if (ImGui::BeginMainMenuBar()) {
             if (ImGui::BeginMenu("Table of Contents")) {
@@ -296,6 +227,52 @@ private:
             }
         }
         renderPage();
+    }
+
+public:
+    PDFViewer(const char* filename)
+        : filename { filename } {
+
+        std::string s = filename;
+        if (s.ends_with(".pdf")) {
+            backend = new PDF(filename);
+        } else if (s.ends_with(".cbz")) {
+            backend = new CBZ(filename);
+        } else {
+            throw std::runtime_error("error: unknown file extension");
+        }
+
+        toc = backend->load_outline();
+        page_count = backend->count_pages();
+    }
+
+    void run() {
+        window.create(sf::VideoMode({ 800, 600 }), "PDF Viewer");
+        window.setVerticalSyncEnabled(true);
+        window.setFramerateLimit(60);
+
+        auto _ = ImGui::SFML::Init(window);
+        renderPage();
+
+        sf::Clock deltaClock;
+        while (window.isOpen()) {
+            while (const std::optional event = window.pollEvent()) {
+                if (event.has_value()) {
+                    ImGui::SFML::ProcessEvent(window, event.value());
+                    handleEvent(event.value());
+                }
+            }
+            ImGui::SFML::Update(window, deltaClock.restart());
+
+            updatePanning();
+            renderGUI();
+
+            window.clear(sf::Color::Black);
+            window.draw(*page_sprite);
+            ImGui::SFML::Render(window);
+            window.display();
+        }
+        ImGui::SFML::Shutdown();
     }
 };
 

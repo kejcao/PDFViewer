@@ -46,7 +46,7 @@ public:
         }
     }
 
-	std::optional<sf::Image> render_page(int page_number) override {
+	sf::Image render_page(int page_number) override {
         return pages[page_number].second;
     }
 
