@@ -14,6 +14,7 @@
 #include <mupdf/fitz/outline.h>
 #include <stdexcept>
 
+#include "SFML/Window/Mouse.hpp"
 #include "backends/backend.h"
 #include "backends/cbz.h"
 #include "backends/pdf.h"
@@ -39,7 +40,7 @@ public:
     bool isPanning = false;
 
     void updatePanning() {
-		// avoid panning when user in imgui overlay
+        // avoid panning when user in imgui overlay
         ImGuiIO& io = ImGui::GetIO();
         if (io.WantCaptureMouse)
             return;
@@ -78,22 +79,28 @@ public:
 
     void fitPage() {
         auto [wx, wy] = window.getSize();
-        auto [pw, ph] = backend->size(current_page);
+		auto [pw, ph] = page_texture.getSize();
+		pw *= zoom;
+		ph *= zoom;
 
         if ((float)pw / ph < (float)wx / wy) {
-            zoom = (float)wy / ph - .1;
+            zoom = (float)wy / ph;
         } else {
-            zoom = (float)wx / pw - .1;
+            zoom = (float)wx / pw;
         }
     }
 
     void renderPage() {
-        sf::Image img = backend->render_page(current_page, zoom);
+        sf::Image img = backend->render_page(current_page, 2);
 
         page_texture = sf::Texture(img);
+        page_texture.setSmooth(true);
         page_sprite = new sf::Sprite(page_texture);
+        page_sprite->scale({ zoom, zoom });
 
         auto [tx, ty] = page_texture.getSize();
+        tx *= zoom;
+        ty *= zoom;
         auto [wx, wy] = window.getSize();
         page_sprite->setPosition({
             wx / 2.0f - tx / 2.0f,
@@ -102,7 +109,9 @@ public:
     }
 
     void run() {
-        window.create(sf::VideoMode({ 800, 600 }), "PDF Viewer");
+        sf::ContextSettings settings { .antiAliasingLevel = 8 };
+        window.create(sf::VideoMode({ 800, 600 }), "PDF Viewer", sf::Style::Default, sf::State::Windowed, settings);
+        window.setVerticalSyncEnabled(true);
         window.setFramerateLimit(60);
         auto _ = ImGui::SFML::Init(window);
         renderPage();
@@ -160,9 +169,13 @@ private:
 
         if (event.is<sf::Event::Closed>()) {
             window.close();
+        } else if (const auto* mousePress = event.getIf<sf::Event::MouseButtonPressed>()) {
+            if (mousePress->button == sf::Mouse::Button::Right) {
+                nextPage();
+            }
         } else if (const auto* keyPressed = event.getIf<sf::Event::KeyPressed>()) {
-			if (io.WantCaptureKeyboard)
-				return;
+            if (io.WantCaptureKeyboard)
+                return;
             switch (keyPressed->scancode) {
             case sf::Keyboard::Scancode::N:
             case sf::Keyboard::Scancode::Right:
@@ -197,8 +210,8 @@ private:
             window.setView(sf::View(visibleArea));
             renderPage();
         } else if (const auto* mouseWheel = event.getIf<sf::Event::MouseWheelScrolled>()) {
-			if (io.WantCaptureMouse)
-				return;
+            if (io.WantCaptureMouse)
+                return;
             if (mouseWheel->delta < 0) {
                 zoom /= 1.2f;
                 renderPage();

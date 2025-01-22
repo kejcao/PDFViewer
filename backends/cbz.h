@@ -47,10 +47,7 @@ public:
     }
 
     sf::Image render_page(int page_number, float zoom) override {
-        sf::Image i = pages[page_number].second;
-        auto [x, y] = i.getSize();
-        i.resize({ (unsigned int)(x * zoom), (unsigned int)(y * zoom) });
-        return i;
+        return pages[page_number].second;
     }
 
     std::pair<int, int> size(int page_number) override {
