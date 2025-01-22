@@ -39,6 +39,11 @@ public:
     bool isPanning = false;
 
     void updatePanning() {
+		// avoid panning when user in imgui overlay
+        ImGuiIO& io = ImGui::GetIO();
+        if (io.WantCaptureMouse)
+            return;
+
         if (sf::Mouse::isButtonPressed(sf::Mouse::Button::Left)) {
             sf::Vector2i mousePos = sf::Mouse::getPosition(window);
 
@@ -91,8 +96,8 @@ public:
         auto [tx, ty] = page_texture.getSize();
         auto [wx, wy] = window.getSize();
         page_sprite->setPosition({
-            (wx - tx) / 2.0f,
-            (wy - ty) / 2.0f,
+            wx / 2.0f - tx / 2.0f,
+            wy / 2.0f - ty / 2.0f,
         });
     }
 
@@ -151,9 +156,13 @@ private:
     }
 
     void handleEvent(const sf::Event& event) {
+        ImGuiIO& io = ImGui::GetIO();
+
         if (event.is<sf::Event::Closed>()) {
             window.close();
         } else if (const auto* keyPressed = event.getIf<sf::Event::KeyPressed>()) {
+			if (io.WantCaptureKeyboard)
+				return;
             switch (keyPressed->scancode) {
             case sf::Keyboard::Scancode::N:
             case sf::Keyboard::Scancode::Right:
@@ -187,16 +196,17 @@ private:
             sf::FloatRect visibleArea({ 0, 0 }, { (float)ev->size.x, (float)ev->size.y });
             window.setView(sf::View(visibleArea));
             renderPage();
+        } else if (const auto* mouseWheel = event.getIf<sf::Event::MouseWheelScrolled>()) {
+			if (io.WantCaptureMouse)
+				return;
+            if (mouseWheel->delta < 0) {
+                zoom /= 1.2f;
+                renderPage();
+            } else {
+                zoom *= 1.2f;
+                renderPage();
+            }
         }
-        // else if (const auto* mouseWheel = event.getIf<sf::Event::MouseWheelScrolled>()) {
-        //     if (mouseWheel->delta < 0) {
-        //         zoom /= 1.2f;
-        //         renderPage();
-        //     } else {
-        //         zoom *= 1.2f;
-        //         renderPage();
-        //     }
-        // }
     }
 
     void nextPage() {
