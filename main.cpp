@@ -32,7 +32,6 @@ private:
     bool dual_mode = false;
 
     std::vector<TOCEntry> toc;
-
     Backend* backend;
 
 public:
@@ -79,9 +78,9 @@ public:
 
     void fitPage() {
         auto [wx, wy] = window.getSize();
-		auto [pw, ph] = page_texture.getSize();
-		pw *= zoom;
-		ph *= zoom;
+        auto [pw, ph] = page_texture.getSize();
+        pw *= zoom;
+        ph *= zoom;
 
         if ((float)pw / ph < (float)wx / wy) {
             zoom = (float)wy / ph;
@@ -90,8 +89,42 @@ public:
         }
     }
 
+    sf::Image concatImagesHorizontally(const sf::Image& image1, const sf::Image& image2) {
+        // Get the dimensions of the two images
+        unsigned int width1 = image1.getSize().x;
+        unsigned int height1 = image1.getSize().y;
+        unsigned int width2 = image2.getSize().x;
+        unsigned int height2 = image2.getSize().y;
+
+        // Calculate the dimensions of the new image
+        unsigned int newWidth = width1 + width2;
+        unsigned int newHeight = std::max(height1, height2);
+
+        // Create a new image with the calculated dimensions
+        sf::Image newImage({ newWidth, newHeight }, sf::Color::Transparent);
+
+        // Copy the pixels from the first image to the new image
+        for (unsigned int y = 0; y < height1; ++y) {
+            for (unsigned int x = 0; x < width1; ++x) {
+                newImage.setPixel({ x, y }, image1.getPixel({ x, y }));
+            }
+        }
+
+        // Copy the pixels from the second image to the new image
+        for (unsigned int y = 0; y < height2; ++y) {
+            for (unsigned int x = 0; x < width2; ++x) {
+                newImage.setPixel({ width1 + x, y }, image2.getPixel({ x, y }));
+            }
+        }
+
+        return newImage;
+    }
+
     void renderPage() {
         sf::Image img = backend->render_page(current_page, 2);
+        if (dual_mode) {
+            img = concatImagesHorizontally(img, backend->render_page(current_page + 1, 2));
+        }
 
         page_texture = sf::Texture(img);
         page_texture.setSmooth(true);
@@ -145,7 +178,10 @@ private:
                     ImGui::SetCursorPosX(20.0f * (entry.level + 1));
 
                     if (ImGui::MenuItem(entry.title.c_str())) {
-						current_page = backend->resolve(entry.uri);
+                        current_page = backend->resolve(entry.uri);
+                        if (dual_mode && current_page % 2 == 1) {
+                            current_page -= 1;
+                        }
                         renderPage();
                     }
                 }
@@ -185,10 +221,12 @@ private:
                 previousPage();
                 break;
             case sf::Keyboard::Scancode::Up:
+            case sf::Keyboard::Scancode::Equal:
                 zoom *= 1.2f;
                 renderPage();
                 break;
             case sf::Keyboard::Scancode::Down:
+            case sf::Keyboard::Scancode::Hyphen:
                 zoom /= 1.2f;
                 renderPage();
                 break;
