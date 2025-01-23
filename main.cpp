@@ -24,31 +24,6 @@ private:
     std::vector<TOCEntry> toc;
     Backend* backend;
 
-    sf::Vector2f lastMousePos;
-    bool isPanning = false;
-
-    void updatePanning() {
-        // avoid panning when user in imgui overlay
-        ImGuiIO& io = ImGui::GetIO();
-        if (io.WantCaptureMouse)
-            return;
-
-        if (sf::Mouse::isButtonPressed(sf::Mouse::Button::Left)) {
-            sf::Vector2i mousePos = sf::Mouse::getPosition(window);
-
-            if (!isPanning) {
-                isPanning = true;
-                lastMousePos = sf::Vector2f(mousePos);
-            } else {
-                sf::Vector2f delta = sf::Vector2f(mousePos) - lastMousePos;
-                page_sprite->move(delta);
-                lastMousePos = sf::Vector2f(mousePos);
-            }
-        } else {
-            isPanning = false;
-        }
-    }
-
     void fitPage() {
         auto [wx, wy] = window.getSize();
         auto [pw, ph] = page_texture.getSize();
@@ -117,9 +92,9 @@ private:
     void renderGUI() {
         if (ImGui::BeginMainMenuBar()) {
             if (ImGui::BeginMenu("Table of Contents")) {
-				if (toc.empty()) {
-					ImGui::MenuItem("Empty... file has no TOC");
-				}
+                if (toc.empty()) {
+                    ImGui::MenuItem("Empty... file has no TOC");
+                }
 
                 for (const auto& entry : toc) {
                     ImGui::SetCursorPosX(20.0f * (entry.level + 1));
@@ -146,14 +121,32 @@ private:
         }
     }
 
+    sf::Vector2f lastMousePos;
+    bool isPanning = false;
     void handleEvent(const sf::Event& event) {
         ImGuiIO& io = ImGui::GetIO();
 
         if (event.is<sf::Event::Closed>()) {
             window.close();
         } else if (const auto* mousePress = event.getIf<sf::Event::MouseButtonPressed>()) {
+            if (io.WantCaptureMouse)
+                return;
+
             if (mousePress->button == sf::Mouse::Button::Right) {
                 nextPage();
+            }
+            if (mousePress->button == sf::Mouse::Button::Left) {
+                if (!isPanning) {
+                    sf::Vector2i mousePos = sf::Mouse::getPosition(window);
+                    isPanning = true;
+                    lastMousePos = sf::Vector2f(mousePos);
+                }
+            }
+        } else if (const auto* mousePress = event.getIf<sf::Event::MouseButtonReleased>()) {
+            if (io.WantCaptureMouse)
+                return;
+            if (mousePress->button == sf::Mouse::Button::Left) {
+                isPanning = false;
             }
         } else if (const auto* keyPressed = event.getIf<sf::Event::KeyPressed>()) {
             if (io.WantCaptureKeyboard)
@@ -268,8 +261,13 @@ public:
             }
             ImGui::SFML::Update(window, deltaClock.restart());
 
-            updatePanning();
             renderGUI();
+            if (isPanning) {
+                sf::Vector2i mousePos = sf::Mouse::getPosition(window);
+                sf::Vector2f delta = sf::Vector2f(mousePos) - lastMousePos;
+                page_sprite->move(delta);
+                lastMousePos = sf::Vector2f(mousePos);
+            }
 
             window.clear(sf::Color::Black);
             window.draw(*page_sprite);
