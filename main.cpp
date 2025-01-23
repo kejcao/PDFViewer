@@ -1,28 +1,71 @@
 #include <SFML/Graphics.hpp>
+#include <fstream>
 #include <imgui-SFML.h>
 #include <imgui.h>
 #include <iostream>
 #include <stdexcept>
+#include <unordered_map>
 
 #include "SFML/Window/Mouse.hpp"
 #include "backends/backend.h"
 #include "backends/cbz.h"
 #include "backends/pdf.h"
 
+struct Settings {
+    bool dual_mode = false;
+    int current_page = 0;
+};
+
+// Remember settings for each document/path that is opened.
+class Metadata {
+    const std::string METADATA_FILE = "/home/kjc/.pdf_viewer";
+
+    std::unordered_map<std::string, Settings> data;
+
+public:
+    void init() {
+        std::ifstream ifs(METADATA_FILE);
+        std::string line;
+		// very finicky
+        while (std::getline(ifs, line)) {
+            int i = line.find(' ');
+            int page = std::stoi(line);
+            int j = line.find(' ', i + 1);
+			std::cout << i << " " << j << " " << line.substr(j + 1) << std::endl;
+            data[line.substr(j + 1)] = { (bool)std::stoi(line.substr(i + 1, j)), page };
+        }
+    }
+
+    void save(const char* filename, Settings setting) {
+        data[filename] = setting;
+
+        // bad serialisation lol, assumes no newline in filename (maybe use library?)
+        std::ofstream out(METADATA_FILE);
+        for (auto [k, v] : data) {
+            out << v.current_page << " " << v.dual_mode << " " << k << "\n";
+        }
+    }
+
+    Settings query(const char* filename) {
+        return data.contains(filename) ? data[filename] : Settings {};
+    }
+};
+
 class PDFViewer {
 private:
     const char* filename;
 
-    int current_page = 0, page_count;
-    float zoom = 1.0f;
+    float zoom = 1.0;
+    int page_count;
+    Backend* backend;
+    Settings settings;
+    std::vector<TOCEntry> toc;
+
+    Metadata metadata;
+
     sf::RenderWindow window;
     sf::Texture page_texture;
     sf::Sprite* page_sprite;
-
-    bool dual_mode = false;
-
-    std::vector<TOCEntry> toc;
-    Backend* backend;
 
     void fitPage() {
         auto [wx, wy] = window.getSize();
@@ -69,9 +112,9 @@ private:
     }
 
     void renderPage() {
-        sf::Image img = backend->render_page(current_page);
-        if (dual_mode) {
-            img = concatImagesHorizontally(img, backend->render_page(current_page + 1));
+        sf::Image img = backend->render_page(settings.current_page);
+        if (settings.dual_mode) {
+            img = concatImagesHorizontally(img, backend->render_page(settings.current_page + 1));
         }
 
         page_texture = sf::Texture(img);
@@ -100,9 +143,9 @@ private:
                     ImGui::SetCursorPosX(20.0f * (entry.level + 1));
 
                     if (ImGui::MenuItem(entry.title.c_str())) {
-                        current_page = entry.page;
-                        if (dual_mode && current_page % 2 == 1) {
-                            current_page -= 1;
+                        settings.current_page = entry.page;
+                        if (settings.dual_mode && settings.current_page % 2 == 1) {
+                            settings.current_page -= 1;
                         }
                         renderPage();
                     }
@@ -110,7 +153,7 @@ private:
                 ImGui::EndMenu();
             }
 
-            ImGui::Text("Page: %d/%d", current_page + 1, page_count);
+            ImGui::Text("Page: %d/%d", settings.current_page + 1, page_count);
 
             float rightAlignPos = ImGui::GetWindowWidth() - ImGui::CalcTextSize(filename).x - ImGui::GetStyle().ItemSpacing.x;
             ImGui::SameLine();
@@ -179,7 +222,7 @@ private:
                 renderPage();
                 break;
             case sf::Keyboard::Scancode::D:
-                dual_mode = !dual_mode;
+                settings.dual_mode = !settings.dual_mode;
                 renderPage();
                 break;
             }
@@ -201,32 +244,36 @@ private:
     }
 
     void nextPage() {
-        if (dual_mode) {
-            if (current_page + 2 < page_count) {
-                current_page += 2;
+        if (settings.dual_mode) {
+            if (settings.current_page + 2 < page_count) {
+                settings.current_page += 2;
             }
         } else {
-            if (current_page + 1 < page_count) {
-                current_page += 1;
+            if (settings.current_page + 1 < page_count) {
+                settings.current_page += 1;
             }
         }
         renderPage();
     }
 
     void previousPage() {
-        if (dual_mode) {
-            if (current_page > 1) {
-                current_page -= 2;
+        if (settings.dual_mode) {
+            if (settings.current_page > 1) {
+                settings.current_page -= 2;
             }
         } else {
-            if (current_page > 0) {
-                current_page -= 1;
+            if (settings.current_page > 0) {
+                settings.current_page -= 1;
             }
         }
         renderPage();
     }
 
 public:
+    ~PDFViewer() {
+        metadata.save(filename, settings);
+    }
+
     PDFViewer(const char* filename)
         : filename { filename } {
 
@@ -241,6 +288,9 @@ public:
 
         toc = backend->load_outline();
         page_count = backend->count_pages();
+
+        metadata.init();
+        settings = metadata.query(filename);
     }
 
     void run() {
@@ -249,6 +299,8 @@ public:
         window.setFramerateLimit(60);
 
         auto _ = ImGui::SFML::Init(window);
+        renderPage();
+		fitPage();
         renderPage();
 
         sf::Clock deltaClock;
@@ -284,8 +336,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    char* path = realpath(argv[1], NULL); // no need to free
     try {
-        PDFViewer viewer(argv[1]);
+        PDFViewer viewer(path);
         viewer.run();
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
