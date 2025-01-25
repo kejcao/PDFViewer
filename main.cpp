@@ -10,44 +10,45 @@
 #include "backends/backend.h"
 #include "backends/cbz.h"
 #include "backends/pdf.h"
+#include "json.hpp"
+
+using json = nlohmann::json;
 
 struct Settings {
     bool dual_mode = false;
     int current_page = 0;
+    std::map<char, int> bookmarks;
 };
 
 // Remember settings for each document/path that is opened.
 class Metadata {
-    const std::string METADATA_FILE = "/home/kjc/.pdf_viewer";
+    const std::string METADATA_FILE = "/home/kjc/.pdfviewer.json";
 
-    std::unordered_map<std::string, Settings> data;
+    json data;
 
 public:
     void init() {
-        std::ifstream ifs(METADATA_FILE);
-        std::string line;
-		// very finicky
-        while (std::getline(ifs, line)) {
-            int i = line.find(' ');
-            int page = std::stoi(line);
-            int j = line.find(' ', i + 1);
-			std::cout << i << " " << j << " " << line.substr(j + 1) << std::endl;
-            data[line.substr(j + 1)] = { (bool)std::stoi(line.substr(i + 1, j)), page };
-        }
+        data = json::parse(std::ifstream(METADATA_FILE));
     }
 
     void save(const char* filename, Settings setting) {
-        data[filename] = setting;
-
-        // bad serialisation lol, assumes no newline in filename (maybe use library?)
+        data[filename] = {
+            { "dual_mode", setting.dual_mode },
+            { "current_page", setting.current_page },
+            { "bookmarks", setting.bookmarks },
+        };
         std::ofstream out(METADATA_FILE);
-        for (auto [k, v] : data) {
-            out << v.current_page << " " << v.dual_mode << " " << k << "\n";
-        }
+        out << std::setw(4) << data << std::endl;
     }
 
     Settings query(const char* filename) {
-        return data.contains(filename) ? data[filename] : Settings {};
+        return data.contains(filename)
+            ? Settings {
+                  data[filename]["dual_mode"],
+                  data[filename]["current_page"],
+                  data[filename]["bookmarks"],
+              }
+            : Settings {};
     }
 };
 
@@ -166,6 +167,7 @@ private:
 
     sf::Vector2f lastMousePos;
     bool isPanning = false;
+    sf::Keyboard::Scan lastScanCode;
     void handleEvent(const sf::Event& event) {
         ImGuiIO& io = ImGui::GetIO();
 
@@ -194,6 +196,21 @@ private:
         } else if (const auto* keyPressed = event.getIf<sf::Event::KeyPressed>()) {
             if (io.WantCaptureKeyboard)
                 return;
+
+            if (lastScanCode == sf::Keyboard::Scancode::M) {
+                settings.bookmarks[(char)keyPressed->scancode] = settings.current_page;
+				lastScanCode = sf::Keyboard::Scancode::N; // dummy value
+				renderPage();
+				return;
+            }
+            if (lastScanCode == sf::Keyboard::Scancode::Apostrophe) {
+                settings.current_page = settings.bookmarks[(char)keyPressed->scancode];
+				lastScanCode = sf::Keyboard::Scancode::N; // dummy value
+				renderPage();
+				return;
+            }
+            lastScanCode = keyPressed->scancode;
+
             switch (keyPressed->scancode) {
             case sf::Keyboard::Scancode::N:
             case sf::Keyboard::Scancode::Space:
@@ -300,7 +317,7 @@ public:
 
         auto _ = ImGui::SFML::Init(window);
         renderPage();
-		fitPage();
+        fitPage();
         renderPage();
 
         sf::Clock deltaClock;
