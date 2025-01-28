@@ -11,7 +11,8 @@ struct TOCEntry {
 
 class Backend {
 public:
-    virtual sf::Image render_page(int page_number) = 0;
+    virtual bool supports_native_render_zoom() = 0;
+    virtual sf::Image render_page(int page_number, float zoom, bool subpixel) = 0;
     virtual std::vector<TOCEntry> load_outline() { return {}; };
     virtual int count_pages() = 0;
 };

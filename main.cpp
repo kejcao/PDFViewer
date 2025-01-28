@@ -68,7 +68,10 @@ private:
     sf::Texture page_texture;
     sf::Sprite* page_sprite;
 
+    bool subpixel = false;
+
     void fitPage() {
+		// fix this!!!
         auto [wx, wy] = window.getSize();
         auto [pw, ph] = page_texture.getSize();
         pw *= zoom;
@@ -78,6 +81,10 @@ private:
             zoom = (float)wy / ph;
         } else {
             zoom = (float)wx / pw;
+        }
+
+        if (!(.2 <= zoom && zoom <= 5)) {
+            zoom = 1;
         }
     }
 
@@ -113,19 +120,23 @@ private:
     }
 
     void renderPage() {
-        sf::Image img = backend->render_page(settings.current_page);
+        sf::Image img = backend->render_page(settings.current_page, zoom, subpixel);
         if (settings.dual_mode) {
-            img = concatImagesHorizontally(img, backend->render_page(settings.current_page + 1));
+            img = concatImagesHorizontally(img, backend->render_page(settings.current_page + 1, zoom, subpixel));
         }
 
         page_texture = sf::Texture(img);
-        page_texture.setSmooth(true);
         page_sprite = new sf::Sprite(page_texture);
-        page_sprite->scale({ zoom, zoom });
+        if (!backend->supports_native_render_zoom()) {
+            page_texture.setSmooth(true);
+            page_sprite->scale({ zoom, zoom });
+        }
 
         auto [tx, ty] = page_texture.getSize();
-        tx *= zoom;
-        ty *= zoom;
+        if (!backend->supports_native_render_zoom()) {
+            tx *= zoom;
+            ty *= zoom;
+        }
         auto [wx, wy] = window.getSize();
         page_sprite->setPosition({
             wx / 2.0f - tx / 2.0f,
@@ -199,15 +210,15 @@ private:
 
             if (lastScanCode == sf::Keyboard::Scancode::M) {
                 settings.bookmarks[(char)keyPressed->scancode] = settings.current_page;
-				lastScanCode = sf::Keyboard::Scancode::N; // dummy value
-				renderPage();
-				return;
+                lastScanCode = sf::Keyboard::Scancode::N; // dummy value
+                renderPage();
+                return;
             }
             if (lastScanCode == sf::Keyboard::Scancode::Apostrophe) {
                 settings.current_page = settings.bookmarks[(char)keyPressed->scancode];
-				lastScanCode = sf::Keyboard::Scancode::N; // dummy value
-				renderPage();
-				return;
+                lastScanCode = sf::Keyboard::Scancode::N; // dummy value
+                renderPage();
+                return;
             }
             lastScanCode = keyPressed->scancode;
 
@@ -223,12 +234,16 @@ private:
                 break;
             case sf::Keyboard::Scancode::Up:
             case sf::Keyboard::Scancode::Equal:
-                zoom *= 1.2f;
+                zoomIn();
                 renderPage();
                 break;
             case sf::Keyboard::Scancode::Down:
             case sf::Keyboard::Scancode::Hyphen:
-                zoom /= 1.2f;
+                zoomOut();
+                renderPage();
+                break;
+            case sf::Keyboard::Scancode::T:
+                subpixel = !subpixel;
                 renderPage();
                 break;
             case sf::Keyboard::Scancode::Q:
@@ -251,12 +266,24 @@ private:
             if (io.WantCaptureMouse)
                 return;
             if (mouseWheel->delta < 0) {
-                zoom /= 1.2f;
+                zoomOut();
                 renderPage();
             } else {
-                zoom *= 1.2f;
+                zoomIn();
                 renderPage();
             }
+        }
+    }
+
+    void zoomIn() {
+        if (zoom < 5) {
+            zoom *= 1.2;
+        }
+    }
+
+    void zoomOut() {
+        if (zoom > .2) {
+            zoom /= 1.2;
         }
     }
 
@@ -317,7 +344,7 @@ public:
 
         auto _ = ImGui::SFML::Init(window);
         renderPage();
-        fitPage();
+        // fitPage();
         renderPage();
 
         sf::Clock deltaClock;

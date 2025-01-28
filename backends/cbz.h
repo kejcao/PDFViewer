@@ -35,7 +35,8 @@ public:
         std::sort(pages.begin(), pages.end());
     }
 
-    sf::Image render_page(int page_number) override {
+	bool supports_native_render_zoom() override { return false; }
+    sf::Image render_page(int page_number, float zoom, bool subpixel) override {
         zip_int64_t index = zip_name_locate(zip, pages[page_number].c_str(), 0);
         zip_file_t* file = zip_fopen_index(zip, index, 0);
 

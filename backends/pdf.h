@@ -3,7 +3,9 @@
 #include <SFML/Graphics.hpp>
 #include <mupdf/fitz.h>
 #include <mupdf/fitz/context.h>
+#include <mupdf/fitz/display-list.h>
 #include <mupdf/fitz/document.h>
+#include <mupdf/fitz/pixmap.h>
 #include <stdexcept>
 
 #pragma once
@@ -38,33 +40,112 @@ public:
         }
     }
 
-    sf::Image render_page(int page_number) override {
+    bool supports_native_render_zoom() override { return true; }
+    sf::Image render_page(int page_number, float zoom, bool subpixel) override {
+        // https://www.mail-archive.com/zathura@lists.pwmt.org/msg00344.html
+
         fz_pixmap* pix;
 
-        fz_try(ctx)
-            pix
-            = fz_new_pixmap_from_page_number(
-                ctx, doc, page_number, fz_scale(2, 2), fz_device_rgb(ctx), 0);
+        fz_display_list* list;
+        fz_device* dev = NULL;
+
+        fz_rect bbox;
+        fz_page* page;
+        fz_var(dev);
+        fz_try(ctx) {
+            page = fz_load_page(ctx, doc, page_number);
+            bbox = fz_bound_page(ctx, page);
+            bbox.x1 = (int)(bbox.x1 * zoom);
+            bbox.y1 = (int)(bbox.y1 * zoom);
+            bbox.x1 *= subpixel ? 3 : 1;
+            list = fz_new_display_list(ctx, bbox);
+
+            dev = fz_new_list_device(ctx, list);
+            fz_run_page(ctx, page, dev, fz_scale((subpixel ? 3 : 1) * zoom, 1 * zoom), NULL);
+        }
+        fz_always(ctx) {
+            fz_close_device(ctx, dev);
+            fz_drop_device(ctx, dev);
+            fz_drop_page(ctx, page);
+        }
         fz_catch(ctx) {
             fz_report_error(ctx);
             throw std::runtime_error("failed to render page");
         }
 
-        unsigned int w = pix->w;
+        dev = NULL;
+        fz_var(dev);
+        fz_try(ctx) {
+            pix = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx), fz_irect_from_rect(bbox), NULL, 0);
+            fz_clear_pixmap_with_value(ctx, pix, 0xff);
+
+            dev = fz_new_draw_device(ctx, fz_identity, pix);
+            fz_run_display_list(ctx, list, dev, fz_identity, bbox, NULL);
+        }
+        fz_always(ctx) {
+            fz_close_device(ctx, dev);
+            fz_drop_device(ctx, dev);
+        }
+        fz_catch(ctx) {
+            fz_report_error(ctx);
+            throw std::runtime_error("failed to render page");
+        }
+        fz_drop_display_list(ctx, list);
+
+        auto filter = [](float x0, float x1, float x2, float x3, float x4) -> float {
+            return x0 * (1.0 / 9) + x1 * (2.0 / 9) + x2 * (3.0 / 9) + x3 * (2.0 / 9) + x4 * (1.0 / 9);
+        };
+
+        unsigned int w = subpixel ? pix->w / 3 : pix->w;
         unsigned int h = pix->h;
         unsigned char* pixels = new unsigned char[w * h * 4];
         int i = 0;
         for (int y = 0; y < h; ++y) {
             unsigned char* p = &pix->samples[y * pix->stride];
 
-            for (int x = 0; x < w; ++x) {
+            if (subpixel) {
                 pixels[i * 4 + 0] = p[0];
                 pixels[i * 4 + 1] = p[1];
                 pixels[i * 4 + 2] = p[2];
                 pixels[i * 4 + 3] = 255;
-
-                p += pix->n;
                 i += 1;
+                p += pix->n * 3;
+
+                for (int x = 1; x < w - 1; ++x) {
+                    int n = pix->n;
+
+                    p += 1;
+                    float r = filter(p[-n * 2], p[-n], p[0], p[n], p[n * 2]);
+                    p += 1;
+                    float g = filter(p[-n * 2], p[-n], p[0], p[n], p[n * 2]);
+                    p += 1;
+                    float b = filter(p[-n * 2], p[-n], p[0], p[n], p[n * 2]);
+
+                    pixels[i * 4 + 0] = (int)r;
+                    pixels[i * 4 + 1] = (int)g;
+                    pixels[i * 4 + 2] = (int)b;
+                    pixels[i * 4 + 3] = 255;
+
+                    i += 1;
+                    p += pix->n * 2;
+                }
+
+                pixels[i * 4 + 0] = p[0];
+                pixels[i * 4 + 1] = p[1];
+                pixels[i * 4 + 2] = p[2];
+                pixels[i * 4 + 3] = 255;
+                i += 1;
+                p += pix->n * 3;
+            } else {
+                for (int x = 0; x < w; ++x) {
+                    pixels[i * 4 + 0] = p[0];
+                    pixels[i * 4 + 1] = p[1];
+                    pixels[i * 4 + 2] = p[2];
+                    pixels[i * 4 + 3] = 255;
+
+                    p += pix->n;
+                    i += 1;
+                }
             }
         }
         auto ret = sf::Image({ w, h }, pixels);
