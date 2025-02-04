@@ -68,58 +68,45 @@ private:
     sf::Texture page_texture;
     sf::Sprite* page_sprite;
 
-    bool subpixel = false;
+    bool subpixel = true;
 
     void fitPage() {
-		// fix this!!!
-        auto [wx, wy] = window.getSize();
+        auto [ww, wh] = window.getSize();
         auto [pw, ph] = page_texture.getSize();
-        pw *= zoom;
-        ph *= zoom;
 
-        if ((float)pw / ph < (float)wx / wy) {
-            zoom = (float)wy / ph;
+        if ((float)pw / ph < (float)ww / wh) {
+            zoom = (float)wh / ph * zoom;
         } else {
-            zoom = (float)wx / pw;
-        }
-
-        if (!(.2 <= zoom && zoom <= 5)) {
-            zoom = 1;
+            zoom = (float)ww / pw * zoom;
         }
     }
 
     sf::Image concatImagesHorizontally(const sf::Image& image1, const sf::Image& image2) {
-        // Get the dimensions of the two images
-        unsigned int width1 = image1.getSize().x;
-        unsigned int height1 = image1.getSize().y;
-        unsigned int width2 = image2.getSize().x;
-        unsigned int height2 = image2.getSize().y;
+        auto [w1, h1] = image1.getSize();
+        auto [w2, h2] = image2.getSize();
 
-        // Calculate the dimensions of the new image
-        unsigned int newWidth = width1 + width2;
-        unsigned int newHeight = std::max(height1, height2);
+        sf::Image newImage({ w1 + w2, std::max(h1, h2) }, sf::Color::Transparent);
 
-        // Create a new image with the calculated dimensions
-        sf::Image newImage({ newWidth, newHeight }, sf::Color::Transparent);
-
-        // Copy the pixels from the first image to the new image
-        for (unsigned int y = 0; y < height1; ++y) {
-            for (unsigned int x = 0; x < width1; ++x) {
+        for (unsigned int y = 0; y < h1; ++y) {
+            for (unsigned int x = 0; x < w1; ++x) {
                 newImage.setPixel({ x, y }, image1.getPixel({ x, y }));
             }
         }
-
-        // Copy the pixels from the second image to the new image
-        for (unsigned int y = 0; y < height2; ++y) {
-            for (unsigned int x = 0; x < width2; ++x) {
-                newImage.setPixel({ width1 + x, y }, image2.getPixel({ x, y }));
+        for (unsigned int y = 0; y < h2; ++y) {
+            for (unsigned int x = 0; x < w2; ++x) {
+                newImage.setPixel({ w1 + x, y }, image2.getPixel({ x, y }));
             }
         }
-
         return newImage;
     }
 
     void renderPage() {
+        using std::chrono::duration_cast;
+        using std::chrono::high_resolution_clock;
+        using std::chrono::milliseconds;
+
+        auto t1 = high_resolution_clock::now();
+
         sf::Image img = backend->render_page(settings.current_page, zoom, subpixel);
         if (settings.dual_mode) {
             img = concatImagesHorizontally(img, backend->render_page(settings.current_page + 1, zoom, subpixel));
@@ -142,9 +129,13 @@ private:
             wx / 2.0f - tx / 2.0f,
             wy / 2.0f - ty / 2.0f,
         });
+
+        auto t2 = high_resolution_clock::now();
+        std::cout << duration_cast<milliseconds>(t2 - t1) << " to render" << std::endl;
     }
 
     void renderGUI() {
+		int i = 0;
         if (ImGui::BeginMainMenuBar()) {
             if (ImGui::BeginMenu("Table of Contents")) {
                 if (toc.empty()) {
@@ -154,7 +145,9 @@ private:
                 for (const auto& entry : toc) {
                     ImGui::SetCursorPosX(20.0f * (entry.level + 1));
 
-                    if (ImGui::MenuItem(entry.title.c_str())) {
+					i += 1;
+					std::string s = entry.title + "##" + std::to_string(i);
+                    if (ImGui::MenuItem(s.c_str())) {
                         settings.current_page = entry.page;
                         if (settings.dual_mode && settings.current_page % 2 == 1) {
                             settings.current_page -= 1;
@@ -375,6 +368,24 @@ public:
 };
 
 int main(int argc, char** argv) {
+    //  if (true) {
+    //      using std::chrono::duration_cast;
+    //      using std::chrono::high_resolution_clock;
+    //      using std::chrono::milliseconds;
+    //
+    //      Backend* backend = new PDF("/home/kjc/closet/library/Roberto Casati_ Patrick Cavanagh - The Visual World of Shadows-MIT Press (2019).pdf");
+    //      int page_count = backend->count_pages();
+    //      for (int i = 0; i < page_count; ++i) {
+    //          auto t1 = high_resolution_clock::now();
+    // sf::Image a = backend->render_page(i, 2, true);
+    // sf::Image b = backend->render_page(i+1, 2, true);
+    // sf::Image s = concatImagesHorizontally(a,b);
+    //          auto t2 = high_resolution_clock::now();
+    //          std::cout << duration_cast<milliseconds>(t2 - t1) << std::endl;
+    //      }
+    //      return 0;
+    //  }
+
     if (argc < 2) {
         std::cout << "USAGE: " << argv[0] << " <pdf_file>" << std::endl;
         return 1;
