@@ -108,7 +108,7 @@ private:
         auto t1 = high_resolution_clock::now();
 
         sf::Image img = backend->render_page(settings.current_page, zoom, subpixel);
-        if (settings.dual_mode) {
+        if (settings.dual_mode && settings.current_page + 1 < page_count) {
             img = concatImagesHorizontally(img, backend->render_page(settings.current_page + 1, zoom, subpixel));
         }
 
@@ -135,7 +135,7 @@ private:
     }
 
     void renderGUI() {
-		int i = 0;
+        int i = 0;
         if (ImGui::BeginMainMenuBar()) {
             if (ImGui::BeginMenu("Table of Contents")) {
                 if (toc.empty()) {
@@ -145,8 +145,8 @@ private:
                 for (const auto& entry : toc) {
                     ImGui::SetCursorPosX(20.0f * (entry.level + 1));
 
-					i += 1;
-					std::string s = entry.title + "##" + std::to_string(i);
+                    i += 1;
+                    std::string s = entry.title + "##" + std::to_string(i);
                     if (ImGui::MenuItem(s.c_str())) {
                         settings.current_page = entry.page;
                         if (settings.dual_mode && settings.current_page % 2 == 1) {
