@@ -15,7 +15,7 @@ private:
 
     // Follows the definition on Wikipedia:
     // https://en.wikipedia.org/wiki/Lanczos_resampling
-    double lanczos3(double x) {
+    double lanczos2(double x) {
         constexpr double a = 2;
         if (x == 0)
             return 1;
@@ -40,7 +40,7 @@ private:
         // lanczos function to these distances (its called lanczos resampling,
         // after all). The resulting numbers are called "weights."
         //
-        // This is a memoization/caching step -- computing lanczos3 25-times
+        // This is a memoization/caching step -- computing lanczos2 25-times
         // for each output pixel (x,y) is expensive, but by mapping the output
         // pixel to a position in the source image and pre-computing the
         // weights we gain huge savings/speedups.
@@ -49,7 +49,7 @@ private:
             double weights[5];
         };
 
-        // compute in the weights for the y-direction.
+        // compute the weights in the y-direction.
         struct KernelEntry weights_ys[out_h];
         for (int y = 0; y < out_h; ++y) {
             double srcY = (double)y / zoom;
@@ -64,11 +64,11 @@ private:
 
             weights_ys[y] = (struct KernelEntry) { lo, hi };
             for (int y_ = lo; y_ <= hi; ++y_) {
-                weights_ys[y].weights[y_ - lo] = lanczos3(y_ - srcY);
+                weights_ys[y].weights[y_ - lo] = lanczos2(y_ - srcY);
             }
         }
 
-        // compute in the weights for the x-direction.
+        // compute the weights in the x-direction.
         struct KernelEntry weights_xs[out_w];
         for (int x = 0; x < out_w; ++x) {
             double srcX = (double)x / zoom;
@@ -83,22 +83,22 @@ private:
 
             weights_xs[x] = (struct KernelEntry) { lo, hi };
             for (int x_ = lo; x_ <= hi; ++x_) {
-                weights_xs[x].weights[x_ - lo] = lanczos3(x_ - srcX);
+                weights_xs[x].weights[x_ - lo] = lanczos2(x_ - srcX);
             }
         }
 
-		// loop through each output pixel
+        // loop through each output pixel
         for (int y = 0; y < out_h; ++y) {
             for (int x = 0; x < out_w; ++x) {
                 int out_i = (y * out_w + x) * 4;
                 out_data[out_i + 3] = 255; // alpha = 255
 
-				// loop through each color channel independently (RGB)
+                // loop through each color channel independently (RGB)
                 for (int channel = 0; channel < 3; ++channel) {
                     double sum = 0;
                     double total_weight = 0;
 
-					// compute the kernel stuff
+                    // compute the kernel stuff
                     for (int y_ = weights_ys[y].lo; y_ <= weights_ys[y].hi; ++y_) {
                         for (int x_ = weights_xs[x].lo; x_ <= weights_xs[x].hi; ++x_) {
                             double wy = weights_ys[y].weights[y_ - weights_ys[y].lo];
@@ -140,7 +140,6 @@ public:
         std::sort(pages.begin(), pages.end());
     }
 
-    bool supports_native_render_zoom() override { return true; }
     sf::Image render_page(int page_number, float zoom, bool subpixel) override {
         zip_int64_t index = zip_name_locate(zip, pages[page_number].c_str(), 0);
         zip_file_t* file = zip_fopen_index(zip, index, 0);

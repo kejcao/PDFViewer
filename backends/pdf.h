@@ -40,7 +40,6 @@ public:
         }
     }
 
-    bool supports_native_render_zoom() override { return true; }
     sf::Image render_page(int page_number, float zoom, bool subpixel) override {
         // https://www.mail-archive.com/zathura@lists.pwmt.org/msg00344.html
 

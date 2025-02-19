@@ -81,6 +81,8 @@ private:
         }
     }
 
+    // Only takes 4-8 ms, surprisingly. Thought using setPixel(), getPixel()
+    // might be slow.
     sf::Image concatImagesHorizontally(const sf::Image& image1, const sf::Image& image2) {
         auto [w1, h1] = image1.getSize();
         auto [w2, h2] = image2.getSize();
@@ -107,23 +109,16 @@ private:
 
         auto t1 = high_resolution_clock::now();
 
-        sf::Image img = backend->render_page(settings.current_page, zoom, subpixel);
+        sf::Image page = backend->render_page(settings.current_page, zoom, subpixel);
         if (settings.dual_mode && settings.current_page + 1 < page_count) {
-            img = concatImagesHorizontally(img, backend->render_page(settings.current_page + 1, zoom, subpixel));
+            auto second_page = backend->render_page(settings.current_page + 1, zoom, subpixel);
+            page = concatImagesHorizontally(page, second_page);
         }
 
-        page_texture = sf::Texture(img);
+        page_texture = sf::Texture(page);
         page_sprite = new sf::Sprite(page_texture);
-        if (!backend->supports_native_render_zoom()) {
-            page_texture.setSmooth(true);
-            page_sprite->scale({ zoom, zoom });
-        }
 
         auto [tx, ty] = page_texture.getSize();
-        if (!backend->supports_native_render_zoom()) {
-            tx *= zoom;
-            ty *= zoom;
-        }
         auto [wx, wy] = window.getSize();
         page_sprite->setPosition({
             wx / 2.0f - tx / 2.0f,
