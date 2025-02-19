@@ -165,7 +165,7 @@ private:
     }
 
     sf::Vector2f lastMousePos;
-    bool isPanning = false;
+    bool isPanning = false, shifting = false;
     sf::Keyboard::Scan lastScanCode;
     void handleEvent(const sf::Event& event) {
         ImGuiIO& io = ImGui::GetIO();
@@ -192,7 +192,14 @@ private:
             if (mousePress->button == sf::Mouse::Button::Left) {
                 isPanning = false;
             }
+        } else if (const auto* keyReleased = event.getIf<sf::Event::KeyReleased>()) {
+            if (keyReleased->scancode == sf::Keyboard::Scancode::LShift) {
+                shifting = false;
+            }
         } else if (const auto* keyPressed = event.getIf<sf::Event::KeyPressed>()) {
+            if (keyPressed->scancode == sf::Keyboard::Scancode::LShift) {
+                shifting = true;
+            }
             if (io.WantCaptureKeyboard)
                 return;
 
@@ -243,6 +250,12 @@ private:
                 break;
             case sf::Keyboard::Scancode::D:
                 settings.dual_mode = !settings.dual_mode;
+                renderPage();
+                break;
+            case sf::Keyboard::Scancode::G:
+                settings.current_page = shifting
+                    ? (settings.dual_mode ? page_count - 2 : page_count - 1)
+                    : 0;
                 renderPage();
                 break;
             }
