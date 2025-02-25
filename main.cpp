@@ -277,7 +277,7 @@ private:
     }
 
     void zoomIn() {
-        if (zoom < 5) {
+        if (zoom < 2) {
             zoom *= 1.2;
         }
     }
@@ -344,8 +344,6 @@ public:
         window.setFramerateLimit(60);
 
         auto _ = ImGui::SFML::Init(window);
-        renderPage();
-        // fitPage();
         renderPage();
 
         sf::Clock deltaClock;
