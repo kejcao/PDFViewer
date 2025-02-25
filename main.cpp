@@ -4,7 +4,6 @@
 #include <imgui.h>
 #include <iostream>
 #include <stdexcept>
-#include <unordered_map>
 
 #include "SFML/Window/Mouse.hpp"
 #include "backends/backend.h"
@@ -69,6 +68,7 @@ private:
     sf::Sprite* page_sprite;
 
     bool subpixel = true;
+    bool is_current_page_large = false;
 
     void fitPage() {
         auto [ww, wh] = window.getSize();
@@ -102,16 +102,32 @@ private:
         return newImage;
     }
 
-    void renderPage() {
+    void renderPage(bool handle_special_case = false) {
         using std::chrono::duration_cast;
         using std::chrono::high_resolution_clock;
         using std::chrono::milliseconds;
 
+        if (handle_special_case) {
+            if (settings.current_page > 0) {
+                settings.current_page -= 1;
+            }
+        }
+
         auto t1 = high_resolution_clock::now();
 
         sf::Image page = backend->render_page(settings.current_page, zoom, subpixel);
-        if (settings.dual_mode && settings.current_page + 1 < page_count) {
+        auto [w, h] = page.getSize();
+        is_current_page_large = w * 1.2 > h;
+        if (handle_special_case && !is_current_page_large) {
+            if (settings.current_page > 0) {
+                settings.current_page -= 1;
+            }
+        }
+        if (!is_current_page_large && settings.dual_mode && settings.current_page + 1 < page_count) {
             auto second_page = backend->render_page(settings.current_page + 1, zoom, subpixel);
+            if (handle_special_case) {
+                std::swap(page, second_page);
+            }
             page = concatImagesHorizontally(page, second_page);
         }
 
@@ -290,8 +306,14 @@ private:
 
     void nextPage() {
         if (settings.dual_mode) {
-            if (settings.current_page + 2 < page_count) {
-                settings.current_page += 2;
+            if (is_current_page_large) {
+                if (settings.current_page + 1 < page_count) {
+                    settings.current_page += 1;
+                }
+            } else {
+                if (settings.current_page + 2 < page_count) {
+                    settings.current_page += 2;
+                }
             }
         } else {
             if (settings.current_page + 1 < page_count) {
@@ -303,15 +325,13 @@ private:
 
     void previousPage() {
         if (settings.dual_mode) {
-            if (settings.current_page > 1) {
-                settings.current_page -= 2;
-            }
+            renderPage(true);
         } else {
             if (settings.current_page > 0) {
                 settings.current_page -= 1;
             }
+            renderPage();
         }
-        renderPage();
     }
 
 public:
