@@ -2,11 +2,37 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <iostream>
 #include <stdexcept>
 #include <string>
+#include <variant>
 #include <zip.h>
 
 #pragma once
+
+double gaussian_kernel[5][5];
+void init_gaussian_kernel(double sigma) {
+    double a[5];
+    for (int i = -2; i < 3; ++i) {
+        a[i + 2] = exp(-.5 * i * i / (sigma * sigma));
+    }
+
+    double sum = 0;
+    for (int y = 0; y < 5; ++y) {
+        for (int x = 0; x < 5; ++x) {
+            gaussian_kernel[y][x] = a[y] * a[x];
+            sum += gaussian_kernel[y][x];
+        }
+    }
+
+    // normalize
+    for (int y = 0; y < 5; ++y) {
+        for (int x = 0; x < 5; ++x) {
+            gaussian_kernel[y][x] /= sum;
+        }
+    }
+}
 
 class CBZ : public Backend {
 private:
@@ -29,6 +55,46 @@ private:
         // src & out data are len(w * h * 4); 4 channels, RGBA.
         auto [src_w, src_h] = img.getSize();
         const uint8_t* src_data = img.getPixelsPtr();
+
+        if (zoom < 1.0) { // if downsampling apply gaussian blur for better results
+            init_gaussian_kernel(0.5 * (1.0 / zoom));
+            // init_gaussian_kernel(0.3 * (1.0 / zoom) + 0.8);
+            uint8_t* filtered_src_data = (uint8_t*)malloc(src_w * src_h * 4);
+
+#pragma omp parallel for
+            for (int y = 0; y < src_h; ++y) {
+                for (int x = 0; x < src_w; ++x) {
+                    int y_lo = y - 2;
+                    if (y_lo < 0)
+                        y_lo = 0;
+                    int y_hi = y + 2;
+                    if (y_hi > src_h - 1)
+                        y_hi = src_h - 1;
+
+                    int x_lo = x - 2;
+                    if (x_lo < 0)
+                        x_lo = 0;
+                    int x_hi = x + 2;
+                    if (x_hi > src_w - 1)
+                        x_hi = src_w - 1;
+
+                    double r = 0, g = 0, b = 0;
+                    for (int ky = y_lo; ky <= y_hi; ++ky) {
+                        for (int kx = x_lo; kx <= x_hi; ++kx) {
+                            r += (double)src_data[(ky * src_w + kx) * 4 + 0] * gaussian_kernel[ky - y_lo][kx - x_lo];
+                            g += (double)src_data[(ky * src_w + kx) * 4 + 1] * gaussian_kernel[ky - y_lo][kx - x_lo];
+                            b += (double)src_data[(ky * src_w + kx) * 4 + 2] * gaussian_kernel[ky - y_lo][kx - x_lo];
+                        }
+                    }
+
+                    filtered_src_data[(y * src_w + x) * 4 + 0] = (int)r;
+                    filtered_src_data[(y * src_w + x) * 4 + 1] = (int)g;
+                    filtered_src_data[(y * src_w + x) * 4 + 2] = (int)b;
+                    filtered_src_data[(y * src_w + x) * 4 + 3] = 255;
+                }
+            }
+            src_data = filtered_src_data;
+        }
 
         unsigned int out_w = src_w * zoom;
         unsigned int out_h = src_h * zoom;
@@ -88,6 +154,7 @@ private:
         }
 
         // loop through each output pixel
+#pragma omp parallel for
         for (int y = 0; y < out_h; ++y) {
             for (int x = 0; x < out_w; ++x) {
                 int out_i = (y * out_w + x) * 4;
@@ -132,12 +199,39 @@ public:
 
         for (zip_int64_t i = 0; i < zip_get_num_entries(zip, 0); ++i) {
             std::string fp = zip_get_name(zip, i, 0);
-            if (fp.ends_with(".jpg") || fp.ends_with(".png") || fp.ends_with(".jpeg")) { // not robust at all!!!
-                std::cout << fp << std::endl;
+            if (!fp.starts_with("__MACOSX/") && (fp.ends_with(".jpg") || fp.ends_with(".png") || fp.ends_with(".jpeg"))) { // not robust at all!!!
                 pages.push_back(fp);
             }
         }
-        std::sort(pages.begin(), pages.end());
+
+        auto chunk = [](const std::string& s) {
+            using namespace std;
+
+            vector<variant<int, string>> a = { 0 };
+            for (char c : s) {
+                if (isdigit(c)) {
+                    c -= '0';
+                    if (holds_alternative<int>(a.back()))
+                        a.back() = get<int>(a.back()) * 10 + c;
+                    else
+                        a.push_back(c);
+                } else {
+                    if (holds_alternative<int>(a.back()))
+                        a.push_back(to_string(c));
+                    else
+                        a.back() = get<string>(a.back()) + c;
+                }
+            }
+            return a;
+        };
+        std::sort(pages.begin(), pages.end(),
+            [&](const auto& a, const auto& b) {
+                return chunk(a) < chunk(b);
+            });
+
+        for (const auto& page : pages) {
+            std::cout << page << std::endl;
+        }
     }
 
     sf::Image render_page(int page_number, float zoom, bool subpixel) override {
