@@ -137,8 +137,8 @@ private:
         auto [tx, ty] = page_texture.getSize();
         auto [wx, wy] = window.getSize();
         page_sprite->setPosition({
-            wx / 2.0f - tx / 2.0f,
-            wy / 2.0f - ty / 2.0f,
+            (float)round(wx / 2.0 - tx / 2.0),
+            (float)round(wy / 2.0 - ty / 2.0),
         });
 
         auto t2 = high_resolution_clock::now();
