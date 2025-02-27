@@ -107,6 +107,9 @@ private:
         using std::chrono::high_resolution_clock;
         using std::chrono::milliseconds;
 
+        if (settings.current_page == 0) {
+            handle_special_case = false;
+        }
         if (handle_special_case) {
             if (settings.current_page > 0) {
                 settings.current_page -= 1;
@@ -124,7 +127,8 @@ private:
             }
         }
         if (!is_current_page_large && settings.dual_mode && settings.current_page + 1 < page_count) {
-            auto second_page = backend->render_page(settings.current_page + 1, zoom, subpixel);
+			std::cout << settings.current_page << " " << (handle_special_case ? 0 : 1) << std::endl;
+            auto second_page = backend->render_page(settings.current_page + (handle_special_case ? 0 : 1), zoom, subpixel);
             if (handle_special_case) {
                 std::swap(page, second_page);
             }
