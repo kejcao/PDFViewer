@@ -120,7 +120,7 @@ private:
 
         sf::Image page = backend->render_page(settings.current_page, zoom, subpixel);
         auto [w, h] = page.getSize();
-        is_current_page_large = w * 1.2 > h;
+        is_current_page_large = w > h;
         if (handle_special_case && !is_current_page_large) {
             if (settings.current_page > 0) {
                 settings.current_page -= 1;
