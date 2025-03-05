@@ -16,6 +16,7 @@ using json = nlohmann::json;
 struct Settings {
     bool dual_mode = false;
     int current_page = 0;
+    float zoom = 1.0;
     std::map<char, int> bookmarks;
 };
 
@@ -34,6 +35,7 @@ public:
         data[filename] = {
             { "dual_mode", setting.dual_mode },
             { "current_page", setting.current_page },
+            { "zoom", setting.zoom },
             { "bookmarks", setting.bookmarks },
         };
         std::ofstream out(METADATA_FILE);
@@ -45,6 +47,7 @@ public:
             ? Settings {
                   data[filename]["dual_mode"],
                   data[filename]["current_page"],
+                  data[filename]["zoom"],
                   data[filename]["bookmarks"],
               }
             : Settings {};
@@ -55,7 +58,6 @@ class PDFViewer {
 private:
     const char* filename;
 
-    float zoom = 1.0;
     int page_count;
     Backend* backend;
     Settings settings;
@@ -75,9 +77,9 @@ private:
         auto [pw, ph] = page_texture.getSize();
 
         if ((float)pw / ph < (float)ww / wh) {
-            zoom = (float)wh / ph * zoom;
+            settings.zoom = (float)wh / ph * settings.zoom;
         } else {
-            zoom = (float)ww / pw * zoom;
+            settings.zoom = (float)ww / pw * settings.zoom;
         }
     }
 
@@ -118,7 +120,7 @@ private:
 
         auto t1 = high_resolution_clock::now();
 
-        sf::Image page = backend->render_page(settings.current_page, zoom, subpixel);
+        sf::Image page = backend->render_page(settings.current_page, settings.zoom, subpixel);
         auto [w, h] = page.getSize();
         is_current_page_large = w > h;
         if (handle_special_case && !is_current_page_large) {
@@ -127,8 +129,8 @@ private:
             }
         }
         if (!is_current_page_large && settings.dual_mode && settings.current_page + 1 < page_count) {
-			std::cout << settings.current_page << " " << (handle_special_case ? 0 : 1) << std::endl;
-            auto second_page = backend->render_page(settings.current_page + (handle_special_case ? 0 : 1), zoom, subpixel);
+            std::cout << settings.current_page << " " << (handle_special_case ? 0 : 1) << std::endl;
+            auto second_page = backend->render_page(settings.current_page + (handle_special_case ? 0 : 1), settings.zoom, subpixel);
             if (handle_special_case) {
                 std::swap(page, second_page);
             }
@@ -297,14 +299,14 @@ private:
     }
 
     void zoomIn() {
-        if (zoom < 2) {
-            zoom *= 1.2;
+        if (settings.zoom < 2) {
+            settings.zoom *= 1.2;
         }
     }
 
     void zoomOut() {
-        if (zoom > .2) {
-            zoom /= 1.2;
+        if (settings.zoom > .2) {
+            settings.zoom /= 1.2;
         }
     }
 
