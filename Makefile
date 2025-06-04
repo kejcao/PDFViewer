@@ -1,6 +1,6 @@
 CC = g++
 
-LIBS = -lmupdf -lzip -lGL -lX11 -lXrandr -ludev -lXcursor -lXi
+LIBS = -lmupdf -lzip -lGL -lX11 -lXrandr -ludev -lXcursor -lXi -ldjvulibre
 CFLAGS = -O3 -march=native -std=c++20 -ISFML/include -fopenmp -Iimgui -Iimgui-sfml
 
 pdf: imgui imgui-sfml SFML main.cpp imgui.a backends/*

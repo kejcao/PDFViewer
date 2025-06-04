@@ -9,6 +9,7 @@
 #include "backends/backend.h"
 #include "backends/cbz.h"
 #include "backends/pdf.h"
+#include "backends/djvu.h"
 #include "json.hpp"
 
 using json = nlohmann::json;
@@ -353,6 +354,8 @@ public:
             backend = new PDF(filename);
         } else if (s.ends_with(".cbz")) {
             backend = new CBZ(filename);
+        } else if (s.ends_with(".djvu")) {
+            backend = new DJVU(filename);
         } else {
             throw std::runtime_error("error: unknown file extension");
         }
